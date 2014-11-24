@@ -1,0 +1,5 @@
+#!/bin/sh
+MATLAB=$(matlab -e | grep MATLAB= | sed -e 's/MATLAB=//')
+ARCH=$(matlab -e | grep ARCH= | sed -e 's/ARCH=//')
+export DYLD_FALLBACK_LIBRARY_PATH=/lib:/usr/lib:/usr/X11/lib:$MATLAB/bin/$ARCH
+swipl "$@"

@@ -1,0 +1,27 @@
+#!/bin/sh
+
+function handle_term {
+	echo "### $(date): received SIGTERM" >> "$outputlog"
+	exit
+}
+
+function handle_int {
+	echo "### $(date): received SIGINT" >> "$outputlog"
+}
+
+function handle_hup {
+	echo "### $(date): received SIGHUP" >> "$outputlog"
+	exit
+}
+
+trap handle_int 2
+trap handle_term 15
+trap handle_hup 1
+
+inputlog="$1"
+outputlog="$2"
+shift 2
+
+echo "### $(date): INPUT - $@" >> "$inputlog"
+echo "### $(date): OUTPUT - $@" >> "$outputlog"
+nohup tee -a "$inputlog" | "$@" | nohup tee -a "$outputlog"

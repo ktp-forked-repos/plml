@@ -1,0 +1,31 @@
+#!/bin/sh
+# This script adjusts some of the linkage references in Matlab's dynamically
+# loadable libraries. In particular, links to libtbb and libtbbmalloc seem
+# to lack the @rpath prefix, which means it is not so easy for the dynamic linker
+# to find them when external code tries to link to them. 
+#
+# The changes to libmx, libmwfl, mwi18n and libut here seem sufficient to allow
+# external code to link to and use the Matlab engine library libeng by setting
+# the -rpath option to gcc/ld.
+#
+# The changes should not affect the normal running of Matlab.
+
+MATLAB=$(matlab -e | grep MATLAB= | sed -e 's/MATLAB=//')
+ARCH=$(matlab -e | grep ARCH= | sed -e 's/ARCH=//')
+LIBDIR=$MATLAB/bin/$ARCH
+SOEXT=dylib
+
+for target in {mx,mwfl,mwi18n,ut}; do
+	for ref in {tbb,tbbmalloc}; do
+		LIB="$LIBDIR/lib$target.$SOEXT"
+		echo "About to change $LIB..."
+		if [ -a "$LIB.bkp" ]; then
+			echo "Backup $LIB.bkp already exists"
+		else
+			echo "Backing-up $LIB to $LIB.bkp"
+			cp -p "$LIB" "$LIB.bkp"
+		fi
+		echo "Calling:" install_name_tool -change lib$ref.$SOEXT @rpath/lib$ref.$SOEXT $LIBDIR/lib$target.$SOEXT
+		install_name_tool -change lib$ref.$SOEXT @rpath/lib$ref.$SOEXT $LIBDIR/lib$target.$SOEXT
+	done
+done
