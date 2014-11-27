@@ -13,7 +13,7 @@ Prolog-Matlab bridge for SWI Prolog
     Goldsmiths College, University of London
 
 
-##OVERVIEW
+## OVERVIEW
 
 PLML is a foreign interface that enables Matlab to be used as a computational
 engine from within SWI Prolog. The basic idea is that instead of using
@@ -187,13 +187,13 @@ are resolved!
 
 
 
-##BUILDING/INSTALLATION
+## BUILDING/INSTALLATION
 
 Before you start, you need a working SWI Prolog installation and
 a Matlab installation. Then the `pack_install/1` facility of SWI
 Prolog should be enough to build the C++ code foreign library.
 
-###RESOLVING LINKS TO MATLAB LIBRARIES ON MAC OS X
+### RESOLVING LINKS TO MATLAB LIBRARIES ON MAC OS X
 
 As it stands, there is a minor difficulty when attempting to load
 the plml.dylib foreign library: because of the way the
@@ -222,7 +222,7 @@ load. There are two solutions to this:
 	make backups of your original Matlab libraries if they do not
 	yet exist.
 
-###SANITY CHECK
+### SANITY CHECK
 
 If the installation is ok and you have followed one of the two options
 above, then you should be able to start SWI Prolog and do the following:
@@ -250,132 +250,7 @@ in a straight line plot.
 	?- ?? plot(1:10).
 
 
-##CHANGES
-
-12/04 - Using Prolog blobs with garbage collection to handle
-		Matlab workspace temporary variables. Works but code is
-		still a little messy. Would like to unify variable handling-
-		the important functions are alloc, free, get, put.
-		Also, garbage collection seems to be rather difficult to 
-		provoke.
-
-2005-08-08
-	Handle Matlab errors in mlEXEC by setting lasterr() before and
-		checking it after engEvalString.  If we do get a Matlab
-		error, then throw a Prolog exception, because nothing
-		else is safe in general.  CSR.
-
-2005-08-09
-	Be a little more paranoid in handling workspace variables, both
-		in terms of checking matlab engine error codes and for
-		bounds checking of our own functions such as uniquevar.
-
-2005-09-26
-	Added matbase_mat/1 to enumerate all mat objects actually in
-	the file system pointed to by the matlab function dbroot.
-
-2005-11-11
-	Now sending very long Matlab commands via a char array
-	Progress in Prolog-side mxArray support:
-	done:
-		MXINFO - get size and type of array
-		MXSUB2IND - convert multi-dim subscript to linear index
-		MXGETFLOAT - get one element of numeric array (must be real)
-		MXGETLOGICAL - get element of logical or 0|1 array
-		MXGETCELL - get sub mxArray from cell array
-		MXGETREALS - get reals part of all elements as flat Prolog list
-		MXCREATENUMERIC - create double array
-		MXCREATECELL - create cell array
-		MXCREATESTRING - create char array from string or atom
-		MXPUTFLOAT - write one element of double array
-		MXPUTFLOATS - write list of elements to double array
-		MXPUTCELL  - put an mxArray into a cell array
-		MXCOPYNOGC - deep copy of array, return NON-MANAGED mx ref
-		MXNEWREFGC - return memory managed ref to array, ie will be GCed
-	to do:
-		Imaginary parts?
-		Reading list of fields from a structure
-		Getting cell array contents as a list
-		tidy up: error checking and function names
-		possibly reduce the amount of bounds checking to improve speed?
-		-> need to do proper profiling!
-
-2006-11-28
-	Errors generated on the matlab side (ie errors in user functions
-	rather than the mechanisms of this library) throw exceptions of
-	the form mlerror(Engine,Message) instead of just atomic messages.
-	
-	Some changes to plml.pl - see header in that file for details.
-
-2008-11-25
-	Moved declaration of \ operator to ops.pl
-	Changed interface and implementation of ml_open to use list of options.
-	Changed build procedure to use build script and two makefiles.
-
-2010-02-25
-	Replaced use of mxFree with mxDestroyArray to release resources 
-	obtained using engGetVariable - this was causing a malloc error
-	in Matlab 7.9. Also replaced -nojvm with -noawt option  when starting
-	Matlab, as -nojvm is no longer supported. Apparently they're going
-	to withdraw support for X11 graphics at some point. I hate them.
-	I'm not 'upgrading' any more.
-
-2010-03-19
-	Removed dependency on flists
-
-2010-05-30
-	Merged hostname module into utils.
-
-2012-01
-	Big overhaul of Prolog part to simplify and speed up.
-	Removed unused Matlab functions from matlab/general.
-	Version 1!
-
-2012-02
-	Some changes to mlExec and mlWSAlloc to get around a problem that
-	was bedevilling the triserver project, which was using a Matlab
-	engine in a separate thread, receiving requests on a message queue,
-	and calling this library with call_with_time_limit. Something to
-	do with this combination (threads, signals etc) was causing the
-	Prolog system to lock up hard on returning to Prolog system
-	after a failing call to engGetVariable (which was getting stuck and
-	timing out).
-
-	I still don't know what causes the lock-up, but I was able to detect
-	some signs that it was coming *before* calling engGetVariable by looking
-	at the Matlab engine output buffer.
-
-	Eventual work around is not to use engGetVariable to get uniquevar
-	variable names (mlWSAlloc) or lasterr (mlExec) at all, but simply
-	to scrape these out of the output buffer. This seems to be a few
-	milliseconds faster too.
-
-	other changes: removed ml_debug/1 - would rather have a flag to
-	enable printfs in the C++ source.
-
-2012-02-06
-	Yes, finally, got to the bottom of the locking up bug.
-	The problem was mutlithreaded access to the Matlab engine even when
-	making explicit calls only in one thread IF this is a secondary thread.
-	The reason? Garbage collection in the main thread. Have now added
-	a mutex to protect the Matlab engine (currently one global mutex).
-	If garbage collector is run on a workspace variable blob while the 
-	mutex is locked, it fails immediately without blocking. The blob
-	is not reclaimed but will be can be reclaimed the next time gc is run.
-
-2012-02-09
-	Now using library(debug) for debugging messages. Added more helpful
-	message if foreign library fails to load.
-
-RELEASE NOTES for version 0.2
-
-	- Added option to enable Matlab's JVM
-	- Now closing Matlab engines properly at halt
-	- Added support for valid but non-evaluable expressions
-	- Fixed bug when returning integers from Matlab
-	- Errors in user's Matlab functions now generate mlerror(_,_) expections
-
-##ACKNOWLEDGMENTS
+## ACKNOWLEDGMENTS
 
 This work was partially supported by UK EPSRC grants GR/S84750/01 and
 GR/S82213/01.

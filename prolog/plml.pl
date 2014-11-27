@@ -75,10 +75,10 @@
 
 	*|ml_stmt|* - A Matlab statement
 	==
-	X;Y     :: ml_stmt :-  X:ml_stmt, Y:ml_stmt.
-	X,Y     :: ml_stmt :-  X:ml_stmt, Y:ml_stmt.
-	X=Y     :: ml_stmt :-  X:ml_lval, Y:ml_expr.
-	hide(X) :: ml_stmt :-  X:ml_stmt.
+	X;Y     :: ml_stmt :-  X::ml_stmt, Y::ml_stmt.
+	X,Y     :: ml_stmt :-  X::ml_stmt, Y::ml_stmt.
+	X=Y     :: ml_stmt :-  X::ml_lval, Y::ml_expr.
+	hide(X) :: ml_stmt :-  X::ml_stmt.
 	==
 
 	==

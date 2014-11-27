@@ -82,7 +82,10 @@
 #include <unistd.h>
 #include <pthread.h>
 
+#ifdef __CHAR16_TYPE__
 typedef __CHAR16_TYPE__ char16_t; // fix for Mavericks
+#endif
+
 #include "engine.h"
 
 
