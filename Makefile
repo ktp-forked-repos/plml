@@ -9,7 +9,7 @@ LIBS=-L$(LIBDIR) -lstdc++ -leng -lmx
 
 $(SOBJ): cpp/$(TARGET).o
 	mkdir -p $(PACKSODIR)
-	$(LD) -rpath $(LIBDIR) $(LDSOFLAGS) -o $@ $(SWISOLIB) $< $(LIBS)
+	$(LD) -rpath $(LIBDIR) $(LIBS) $(LDSOFLAGS) -o $@ $(SWISOLIB) $<
 	ln -s $(LIBDIR)/libtbb.dylib $(PACKSODIR)
 	strip -x $@
 
@@ -20,7 +20,10 @@ all: $(SOBJ)
 	$(CC) $(CFLAGS) -o $@ -c $<
 
 check::
-install::
+install:
+	chmod +x scripts/logio
+	chmod +x scripts/swiplml
+	chmod +x scripts/fixdylibs
 clean:
 	rm -f c/$(TARGET).o
 distclean: clean
@@ -29,3 +32,5 @@ distclean: clean
 fixdylibs:
 	sudo scripts/fixdylibs
 
+install-me:
+	swipl -g "pack_install(.), halt"
