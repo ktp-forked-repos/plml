@@ -1,11 +1,3 @@
-/*
- * Prolog part of Prolog-Matlab interface
- * Version 1
- * 
- * Samer Abdallah (2004-2012)
- * Centre for Digital Music, QMUl.
- */
- 
 :- module(plml, 
 	[	ml_open/1      	% (+Id)
 	,	ml_open/2      	% (+Id, +Host)
