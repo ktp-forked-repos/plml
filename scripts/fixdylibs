@@ -16,15 +16,15 @@ LIBDIR=$MATLAB/bin/$ARCH
 SOEXT=dylib
 
 for target in {mx,mwfl,mwi18n,ut}; do
+	LIB="$LIBDIR/lib$target.$SOEXT"
+	echo "About to change $LIB..."
+	if [ -a "$LIB.bkp" ]; then
+		echo "Backup $LIB.bkp already exists"
+	else
+		echo "Backing-up $LIB to $LIB.bkp"
+		cp -p "$LIB" "$LIB.bkp"
+	fi
 	for ref in {tbb,tbbmalloc}; do
-		LIB="$LIBDIR/lib$target.$SOEXT"
-		echo "About to change $LIB..."
-		if [ -a "$LIB.bkp" ]; then
-			echo "Backup $LIB.bkp already exists"
-		else
-			echo "Backing-up $LIB to $LIB.bkp"
-			cp -p "$LIB" "$LIB.bkp"
-		fi
 		echo "Calling:" install_name_tool -change lib$ref.$SOEXT @rpath/lib$ref.$SOEXT $LIBDIR/lib$target.$SOEXT
 		install_name_tool -change lib$ref.$SOEXT @rpath/lib$ref.$SOEXT $LIBDIR/lib$target.$SOEXT
 	done

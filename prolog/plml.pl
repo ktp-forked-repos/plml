@@ -258,7 +258,16 @@ read_line_from_pipe(Cmd,Atom) :-
 % :- getenv('DYLD_FALLBACK_LIBRARY_PATH',P),
 %    format('DYLD path is ~w\n',[P]).
 %
+
+
+% NB: Loading Matlab library can change LANG in environment,
+% so we have to remember what it was and restore it after loading.
+% See also mlOpen: we are going to talk to Matlab via UTF-8 strings.
+:- getenv('LANG',Lang), nb_setval(plml_env_lang,Lang).
 :-	use_foreign_library(foreign(plml)).
+:- nb_getval(plml_env_lang,Lang), setenv('LANG',Lang), 
+   nb_delete(plml_env_lang).
+
 :- initialization(at_halt(ml_closeall)).
 
 ml_closeall :-
@@ -318,6 +327,7 @@ ml_open(Id) :- ml_open(Id,localhost,[]).
 ml_open(Id,Host) :- ml_open(Id,Host,[]).
 ml_open(Id,Host,Options) :- 
 	ground(Id),
+   pack_dir(PackDir), % needed to locate package files
 	options_flags(Options,Flags),
 	option(cmd(Bin),Options,matlab),
 	(	(Host=localhost;hostname(Host))
@@ -328,31 +338,33 @@ ml_open(Id,Host,Options) :-
 	-> debug(plml,'Running Matlab with protocol logging.',[]),
 		debug(plml,'| Prolog > Matlab logged to "~w"',[In]),
 		debug(plml,'| Prolog < Matlab logged to "~w"',[Out]),
-		absolute_file_name(foreign(logio),Spy,[access(read)]),
+		absolute_file_name(PackDir/scripts/logio,Spy,[access(execute)]),
 		format(atom(Exec1),'~w ~w ~w ~w',[Spy,In,Out,Exec])
 	;	Exec1=Exec
 	),
 	format(atom(Cmd),'~w ~w',[Exec1,Flags]),
 	debug(plml,'About to start Matlab with: ~w',[Cmd]),
 	mlOPEN(Cmd,Id),
-
-   module_property(plml,file(ThisFile)),
-   file_directory_name(ThisFile,PrologDir), 
-   file_directory_name(PrologDir,PackDir), 
+	debug(plml,'Setting character set to UTF-8.',[]),
+   ml_exec(Id,hide(feature(`'DefaultCharacterSet',`'UTF-8'))),
    directory_file_path(PackDir,matlab,MatlabDir),
-   debug(plml,"Adding ~q to Matlab path.",[MatlabDir]),
+   debug(plml,'Adding ~q to Matlab path.',[MatlabDir]),
    ml_exec(Id,addpath(q(MatlabDir))),
    expand_file_name('~/var/matbase',[DBROOT]),
-   debug(plml,"Setting MATBASE root to ~q.",[DBROOT]),
+   debug(plml,'Setting MATBASE root to ~q.',[DBROOT]),
    ml_exec(Id,dbroot(q(DBROOT))),
 
 	assert(current_engine(Id)),
-   % !!! add matlab directory to matlab path
 	(	member(noinit,Options) -> true
 	;	forall( matlab_path(_,Dir), maplist(nofail(addpath),Dir)),
 		forall( matlab_init(_,Cmd), nofail(Cmd))
 	).
 					                                                                   
+pack_dir(PackDir) :-
+   module_property(plml,file(ThisFile)),
+   file_directory_name(ThisFile,PrologDir), 
+   file_directory_name(PrologDir,PackDir). 
+
 addpath(local(D)) :- !, ml_exec(ml,padl(q(D))).
 addpath(D) :- !, ml_exec(ml,padd(q(D))).
 
@@ -619,7 +631,7 @@ args(I,X) --> "(", ml_expr(I,X), ")".
 
 %% atm(+A:atom)// is det.
 %  DCG rule to format an atom using write/1.
-atm(A,C,T) :- with_output_to(codes(C,T),write(A)).
+atm(A,C,T) :- format(codes(C,T),'~w',[A]).
 
 varnames(L) :- varnames(1,L).
 varnames(_,[]).
