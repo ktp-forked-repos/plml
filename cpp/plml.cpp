@@ -193,7 +193,7 @@ public:
       outbuf=new char[BUFSIZE];
       outbuf[BUFSIZE-1]=0;
       engOutputBuffer(ep,outbuf,BUFSIZE-1);
-      printf("Matlab engine (%s) open.\n",PL_atom_chars(id));
+      fprintf(stderr,"plml: Matlab engine (%s) open.\n",PL_atom_chars(id));
     } else {
       throw PlException("open engine failed");
     }
@@ -262,6 +262,7 @@ extern "C" {
   foreign_t mlMxPutCell(term_t mx, term_t index, term_t value);
   foreign_t mlMxCopyNoGC(term_t src, term_t dst);
   foreign_t mlMxNewRefGC(term_t src, term_t dst);
+  foreign_t mlGetOutput(term_t engine, term_t string);
 }
 
 install_t install() { 
@@ -291,6 +292,7 @@ install_t install() {
   PL_register_foreign("mlPUTCELL", 3, (pl_function_t)mlMxPutCell, 0);
   PL_register_foreign("mlCOPYNOGC", 2, (pl_function_t)mlMxCopyNoGC, 0);
   PL_register_foreign("mlNEWREFGC", 2, (pl_function_t)mlMxNewRefGC, 0);
+  PL_register_foreign("mlGETOUTPUT", 2, (pl_function_t)mlGetOutput, 0);
   
   mx_blob.magic = PL_BLOB_MAGIC;
   mx_blob.flags = PL_BLOB_UNIQUE;
@@ -320,7 +322,7 @@ install_t install() {
   pthread_mutex_init(&EngMutex,NULL);
 }
 
-void check(int rc) { if (!rc) printf("*** plml: Something failed.\n");}
+void check(int rc) { if (!rc) printf("plml: *** Something failed.\n");}
 
 void check_array_index(mxArray *mx, long i) 
 {
@@ -422,7 +424,6 @@ int mx_write(IOSTREAM *s, atom_t a, int flags) {
 int ws_release(atom_t a) {
   struct wsvar *x=atom_to_wsvar(a);
   int rc;
-  // printf("."); fflush(stdout); // sweet brevity 
   
   char buf[16];
   sprintf(buf,"clear %s",x->name);
@@ -430,7 +431,6 @@ int ws_release(atom_t a) {
      rc=engEvalString(x->engine,buf) ? FALSE : TRUE; 
 	  pthread_mutex_unlock(&EngMutex);
 	} else {
-	//	printf("\n *** cannot release %s while engine locked ***\n",x->name);
 		rc=FALSE;
 	}
 
@@ -470,10 +470,21 @@ static eng *findEngine(term_t id_term)
 static void displayOutput(const char *prefix,const char *p) 
 {
 	while (*p) {
-		fputs(prefix,stdout); 
-		while (*p && *p!='\n') putchar(*p++); 
-		putchar('\n'); if (*p) p++;
+		fputs(prefix,stderr); 
+		while (*p && *p!='\n') fputc(*p++,stderr); 
+		fputc('\n',stderr); if (*p) p++;
 	}
+}
+
+/* utility function to extract UTF-8 encoded character array from 
+ * a Prolog string, code list, or atom. */
+static const char *get_utf8_string_from_term(term_t t)
+{
+	const char *s;
+	if (!PL_get_chars(t,(char **)&s, CVT_ATOM | CVT_STRING | CVT_LIST | BUF_RING | REP_UTF8)) {
+		throw PlException("plml: Could not get UTF-8 string from term");
+	}
+	return s;
 }
 
 /* 
@@ -485,7 +496,7 @@ foreign_t mlOpen(term_t servercmd, term_t id_term)
 {
   try { 
     findEngine(id_term);
-    printf("mlOPEN/2: Engine %s already open\n",(const char *)PlTerm(id_term));
+    fprintf(stderr,"plml: mlOPEN/2: Engine %s already open\n",(const char *)PlTerm(id_term));
                 PL_succeed;
   } catch (...) {}
   
@@ -518,9 +529,6 @@ foreign_t mlClose(term_t engine) {
 
 
 static int raise_exception(const char *msg, const char *loc, const char *info) {
-  // printf("\n!! raising exception: %s\n",msg);
-  // return FALSE;
- 
   term_t ex = PL_new_term_ref();
   return PL_unify_term(ex, PL_FUNCTOR_CHARS, "error", 2,
 			 PL_FUNCTOR_CHARS, "plml_error", 3, PL_CHARS, msg, PL_CHARS, loc, PL_CHARS, info,
@@ -545,13 +553,11 @@ foreign_t mlWSAlloc(term_t eng, term_t blob) {
   try { engine=findEngine(eng); }
   catch (PlException &ex) { return ex.plThrow(); }
 
-  //printf("-- Entering mlWSALLOC         \r"); fflush(stdout); 
   struct wsvar x;
 
   x.engine = engine->ep;
   x.id     = engine->id;
 
-  // printf("-- mlWSAlloc: Calling uniquevar...       \r"); fflush(stdout); 
   {  lock l;
 	  if (engEvalString(x.engine, "uniquevar([])")) 
 		  return raise_exception("eval_failed","uniquevar","none");
@@ -590,17 +596,9 @@ foreign_t mlWSGet(term_t var, term_t val) {
   try { 
     struct wsvar *x = term_to_wsvar(var);
 	 lock l;
-	 // class eng *engine=findEngine(PlTerm(PlAtom(x->id)));
-	 // char *before=strdup(engine->outbuf);
-	 //printf("-- mlWSGET: calling get variable...\n");
     mxArray *p = engGetVariable(x->engine, x->name);
-	 //printf("-- mlWSGET: returned from get variable.\n");
 	 if (p) return PL_unify_blob(val, (void **)&p, sizeof(p), &mx_blob);
 	 else {
-		 //printf("\n!! mlWSGet: failed to get %s.\n",x->name);
-		 //printf("\n!! mlWSGet: before buffer: %s.\n",before);
-		 //printf("\n!! mlWSGet: before after: %s.\n",engine->outbuf);
-		 //return raise_exception("get_variable_failed",before,engine->outbuf);
 		 return raise_exception("get_variable_failed","mlWSGET",x->name);
 	 }
   } catch (PlException &e) { 
@@ -627,10 +625,9 @@ foreign_t mlWSPut(term_t var, term_t val) {
 // Call a Matlab engine to execute the given command
 foreign_t mlExec(term_t engine, term_t cmd) 
 {
-  // printf(" - mlExec: Entering                 \r"); fflush(stdout); 
   try {
     eng *eng=findEngine(engine);
-	 const char *cmdstr=PlTerm(cmd);
+	 const char *cmdstr=get_utf8_string_from_term(cmd);
 	 int	cmdlen=strlen(cmdstr);
 	 int	rc;
 	 lock l;
@@ -708,8 +705,8 @@ foreign_t mlExec(term_t engine, term_t cmd)
 	 //printf(" - mlExec: Got last error (%p)               \r",lasterr); fflush(stdout);
 
 	 if (!lasterr) {
-		 printf("\n** mlExec: unable to get lasterr.\n");
-		 printf("** mlExec: Output buffer contains: '%s'.\n",eng->outbuf);
+		 fprintf(stderr,"\nplml: ** mlExec unable to get lasterr.\n");
+		 fprintf(stderr,"plml: ** mlExec output buffer contains: '%s'.\n",eng->outbuf);
 		 throw PlException("mlExec: unable to get lasterr");
 	 }
     
@@ -737,6 +734,16 @@ foreign_t mlExec(term_t engine, term_t cmd)
   }
 }
 
+foreign_t mlGetOutput(term_t engine, term_t s)
+{
+  try {
+    eng *eng=findEngine(engine);
+	 return PL_unify_chars(s, PL_STRING | REP_UTF8, -1, eng->outbuf);
+  } catch (PlException &e) { 
+    return e.plThrow(); 
+  }
+}
+
 // Get a Prolog string out of a matlab char array 
 foreign_t mlMx2String(term_t mx, term_t a)
 {
@@ -745,7 +752,7 @@ foreign_t mlMx2String(term_t mx, term_t a)
     if (!str) {
       return PL_warning("array is not a character array");
     }
-    int rc = PL_unify_string_chars(a, str);
+    int rc = PL_unify_chars(a, PL_STRING | REP_UTF8, -1, str);
     mxFree(str);
     return rc;
   } catch (PlException &e) { 
@@ -761,7 +768,7 @@ foreign_t mlMx2Atom(term_t mx, term_t a)
     if (!str) {
       return PL_warning("array is not a character array");
     }
-    int rc = PL_unify_atom_chars(a, str);
+    int rc = PL_unify_chars(a, PL_ATOM | REP_UTF8, -1, str);
     mxFree(str);
     return rc;
   } catch (PlException &e) { 
@@ -990,10 +997,10 @@ foreign_t mlMxCreateCell(term_t size, term_t mx) {
   }
 }
 
-// Create numeric array. Currently only real double arrays created
+// Create character array. 
 foreign_t mlMxCreateString(term_t string, term_t mx) {
   try { 
-    mxArray *p = mxCreateString(PlTerm(string));
+    mxArray *p = mxCreateString(get_utf8_string_from_term(string));
     return PL_unify_blob(mx, (void **)&p, sizeof(p), &mxnogc_blob);
   } catch (PlException &e) { 
     return e.plThrow(); 
