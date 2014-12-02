@@ -34,3 +34,6 @@ fixdylibs:
 
 install-me:
 	swipl -g "pack_install(.), halt"
+
+publish:
+	swipl -g "pack_property(plml,download(D)), pack_install(D), halt"
