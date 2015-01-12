@@ -15,7 +15,7 @@ endif
 
 $(SOBJ): cpp/$(TARGET).o
 	mkdir -p $(PACKSODIR)
-	$(LD) -rpath $(LIBDIR) $(LIBS) $(LDSOFLAGS) -o $@ $(SWISOLIB) $<
+	$(LD) $(EXTRA_LDFLAGS) $(LIBS) $(LDSOFLAGS) -o $@ $(SWISOLIB) $<
 	ln -s $(LIBDIR)/libtbb.dylib $(PACKSODIR)
 	strip -x $@
 
