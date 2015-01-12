@@ -7,6 +7,12 @@ CFLAGS+=-I$(MATLAB)/extern/include
 LIBDIR=$(MATLAB)/bin/$(MLARCH)
 LIBS=-L$(LIBDIR) -lstdc++ -leng -lmx
 
+ifeq ($(SOEXT),dylib)
+	EXTRA_LDFLAGS=-rpath $(LIBDIR)
+else
+	EXTRA_LDFLAGS=
+endif
+
 $(SOBJ): cpp/$(TARGET).o
 	mkdir -p $(PACKSODIR)
 	$(LD) -rpath $(LIBDIR) $(LIBS) $(LDSOFLAGS) -o $@ $(SWISOLIB) $<
