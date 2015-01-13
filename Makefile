@@ -5,7 +5,7 @@ TARGET=plml
 SOBJ=$(PACKSODIR)/$(TARGET).$(SOEXT)
 CFLAGS+=-I$(MATLAB)/extern/include
 LIBDIR=$(MATLAB)/bin/$(MLARCH)
-LIBS=-L$(LIBDIR) -lstdc++ -leng -lmx
+LIBS=-lstdc++ -L$(LIBDIR) -leng -lmx
 
 ifeq ($(SOEXT),dylib)
 	EXTRA_LDFLAGS=-rpath $(LIBDIR)
@@ -13,10 +13,10 @@ else
 	EXTRA_LDFLAGS=
 endif
 
+#-Xlinker -rpath -Xlinker $(LIBDIR)
 $(SOBJ): cpp/$(TARGET).o
 	mkdir -p $(PACKSODIR)
-	$(LD) $(EXTRA_LDFLAGS) $(LIBS) $(LDSOFLAGS) -o $@ $(SWISOLIB) $<
-	ln -s $(LIBDIR)/libtbb.dylib $(PACKSODIR)
+	$(LD) $(LDSOFLAGS) $(EXTRA_LDFLAGS) $(LIBS) -o $@ $(SWISOLIB) $< -lstdc++
 	strip -x $@
 
 .SUFFIXES: .cpp .o
