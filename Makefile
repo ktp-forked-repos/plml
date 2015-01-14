@@ -5,18 +5,17 @@ TARGET=plml
 SOBJ=$(PACKSODIR)/$(TARGET).$(SOEXT)
 CFLAGS+=-I$(MATLAB)/extern/include
 LIBDIR=$(MATLAB)/bin/$(MLARCH)
-LIBS=-lstdc++ -L$(LIBDIR) -leng -lmx
+LIBS=-L$(LIBDIR) -leng -lmx
 
 ifeq ($(SOEXT),dylib)
-	EXTRA_LDFLAGS=-rpath $(LIBDIR)
+	POST_LDFLAGS=-rpath $(LIBDIR) $(LIBS)
 else
-	EXTRA_LDFLAGS=
+	POST_LDFLAGS=-Wl,-rpath=$(LIBDIR) $(LIBS)
 endif
 
-#-Xlinker -rpath -Xlinker $(LIBDIR)
 $(SOBJ): cpp/$(TARGET).o
 	mkdir -p $(PACKSODIR)
-	$(LD) $(LDSOFLAGS) $(EXTRA_LDFLAGS) $(LIBS) -o $@ $(SWISOLIB) $< -lstdc++
+	$(LD) $(LDSOFLAGS) -o $@ $(SWISOLIB) $< -lstdc++ $(POST_LDFLAGS)
 	strip -x $@
 
 .SUFFIXES: .cpp .o
