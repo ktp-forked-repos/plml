@@ -471,7 +471,7 @@ stmt(I,Expr)       --> !, ml_expr(I,Expr).
 %  Convert Matlab expression as a Prolog term to string representation.
 ml_expr(_,\X)         --> !, phrase(X).
 ml_expr(I,$X)         --> !, {pl2ml_hook(X,Y)}, ml_expr(I,Y).
-ml_expr(I,q(X))       --> !, q(stmt(I,X)).
+ml_expr(I,q(X))       --> !, ({string(X)} -> q(str(X)); q(stmt(I,X))).
 ml_expr(I,qq(X))      --> !, qq(stmt(I,X)).
 ml_expr(_,tq(X))      --> !, q(pl2tex(X)).
 ml_expr(_,atom(X))    --> !, atm(X).
