@@ -7,6 +7,8 @@
 	,	ml_exec/2    		% (+Id, +Expr)
 	,	ml_eval/4     		% (+Id, +Expr, +Types, -Vals)
 	,	ml_test/2      	% (+Id, +Expr)
+   ,  ml_ws_name/3
+   ,  leftval/3
 
 	,	(??)/1            % (+Expr)        ~execute Matlab expression
 	,	(???)/1           % (+Expr)        ~test Matlab boolean expression
@@ -207,8 +209,9 @@ options_flags(Opts,Flags) :-
 %
 %  Execute Matlab expression without returning any values.
 ml_exec(Id,X)  :- 
+	debug(plml,'plml:ml_exec term ~W',[X,[max_depth(10)]]),
 	term_mlstring(Id,X,C), !, 
-	debug(plml,'plml:ml_exec>> ~s',[C]),
+	debug(plml(commands),'plml:ml_exec>> ~s',[C]),
 	mlEXEC(Id,C).
 
 %% ml_eval(+Id:ml_eng, +Expr:ml_expr, +Types:list(type), -Res:list(ml_val)) is det.
@@ -217,9 +220,9 @@ ml_exec(Id,X)  :-
 %  form uses an explicit output types list, so Res can be completely unbound on entry
 %  even when multiple values are required.
 ml_eval(Id,X,Types,Vals) :-
-	maplist(alloc_ws(Id),Vars,Names), 
+	maplist(alloc_ws(Id),Types,Vars,Names), 
 	ml_exec(Id,hide(atom_list(Names)=X)), 
-	time(maplist(convert_ws,Types,Vars,Vals)).
+	maplist(convert_ws,Types,Vars,Vals).
 
 % alternative approach, hopefully faster
 ml_eval_alt(Id,X,Types,Vals) :-
@@ -228,12 +231,13 @@ ml_eval_alt(Id,X,Types,Vals) :-
    % now extract ws var names from output and attach to ws blobs in Vals
 	time(maplist(convert_ws,Types,Vars,Vals)).
 
-alloc_ws(I,Z,N) :- mlWSALLOC(I,Z), mlWSNAME(Z,N,I).
+alloc_ws(I,_,Z,N) :- mlWSALLOC(I,Z), mlWSNAME(Z,N,I).
 
 %% ml_test(+Id:ml_eng, +X:ml_expr(bool)) is semidet.
 %  Succeeds if X evaluates to true in Matlab session Id.
 ml_test(Id,X)   :- ml_eval(Id,X,[bool],[1]).
 
+ml_ws_name(X,Y,Z) :- mlWSNAME(X,Y,Z).
 
 %% ??(X:ml_expr(_)) is det.
 %  Execute Matlab expression X as with ml_exec/2, without returning any values.
