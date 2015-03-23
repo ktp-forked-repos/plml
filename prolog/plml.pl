@@ -7,6 +7,8 @@
 	,	ml_exec/2    		% (+Id, +Expr)
 	,	ml_eval/4     		% (+Id, +Expr, +Types, -Vals)
 	,	ml_test/2      	% (+Id, +Expr)
+   ,  ml_ws_name/3
+   ,  leftval/3
 
 	,	(??)/1            % (+Expr)        ~execute Matlab expression
 	,	(???)/1           % (+Expr)        ~test Matlab boolean expression
@@ -381,8 +383,9 @@ options_flags(Opts,Flags) :-
 %
 %  Execute Matlab expression without returning any values.
 ml_exec(Id,X)  :- 
+	debug(plml,'plml:ml_exec term ~W',[X,[max_depth(10)]]),
 	term_mlstring(Id,X,C), !, 
-	debug(plml,'plml:ml_exec>> ~s',[C]),
+	debug(plml(commands),'plml:ml_exec>> ~s',[C]),
 	mlEXEC(Id,C).
 
 %% ml_eval(+Id:ml_eng, +Expr:ml_expr, +Types:list(type), -Res:list(ml_val)) is det.
@@ -401,6 +404,7 @@ alloc_ws(I,_,Z) :- mlWSALLOC(I,Z).
 %  Succeeds if X evaluates to true in Matlab session Id.
 ml_test(Id,X)   :- ml_eval(Id,X,[bool],[1]).
 
+ml_ws_name(X,Y,Z) :- mlWSNAME(X,Y,Z).
 
 
 %% ===(Y:ml_vals(A), X:ml_expr(A)) is det.
