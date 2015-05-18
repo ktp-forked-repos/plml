@@ -1,8 +1,24 @@
 /*
- * Prolog-MATLAB interface
- * Samer Abdallah (2004)
- * Christophe Rhodes (2005)
+ * Part of plml: Prolog-Matlab interface
+ * Copyright Samer Abdallah (Queen Mary University of London) 2004-2015
+ *           Christophe Rhodes (Goldsmiths College University of London) 2005
  *
+ *	This program is free software; you can redistribute it and/or
+ *	modify it under the terms of the GNU General Public License
+ *	as published by the Free Software Foundation; either version 2
+ *	of the License, or (at your option) any later version.
+ *
+ *	This program is distributed in the hope that it will be useful,
+ *	but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *	GNU General Public License for more details.
+ *
+ *	You should have received a copy of the GNU General Public
+ *	License along with this library; if not, write to the Free Software
+ *	Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+
+/*
  * These are some foreign for procedures to enable SWI Prolog to run
  * and communicate with a MATLAB computational engine, which is
  * started as a separate process on the local or a remote machine.
@@ -74,7 +90,7 @@
  *
  *      13/12/04: Removed all traces of old ws var handling code.
  *
- *      (Later changes may be found in the README file)
+ *      (Later changes may be found in the CHANGES file)
  */
 
 #include <SWI-cpp.h>
