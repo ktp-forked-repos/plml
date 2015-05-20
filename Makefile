@@ -46,7 +46,7 @@ fixdylibs:
 	sudo scripts/fixdylibs
 
 install-me:
-	swipl -f none -g "pack_install(.), halt"
+	swipl -f none -g "pack_install(.,[upgrade(true)]), halt"
 
 publish:
 	swipl -f none -g "pack_property(plml,download(D)), pack_install(D), halt"
