@@ -54,7 +54,6 @@
  *   A better solution would be to flip the management status of a given
  *   mx_blob atom as necessary.
  *
- * TODO
  *
  * - (See plmatlab.pl for comments about the syntax for Prolog-side
  * users)
@@ -105,19 +104,12 @@ typedef __CHAR16_TYPE__ char16_t; // fix for Mavericks
 #include "engine.h"
 
 
-#define ALT_LASTERR 1
-
 /* The maximum number of simultaneous connections to Matlab from one
    Prolog process. */
-#define MAXENGINES 4    
-#define BUFSIZE  32768 // buffer for matlab output
+#define MAXENGINES 8
+#define BUFSIZE  65536 // buffer for matlab output
 #define MAXCMDLEN 256
-
-#ifdef ALT_LASTERR
-#	define EVALFMT "lasterr('');disp('#');%s"
-#else
-#	define EVALFMT "lasterr('');disp('#');%s\nt__ex=lasterr;"
-#endif
+#define EVALFMT "lasterr('');disp('#');%s"
 
 /* using namespace std; */
 
@@ -316,7 +308,7 @@ install_t install() {
   mx_blob.acquire = 0; 
   mx_blob.release = mx_release;
   mx_blob.compare = mx_compare;
-  mx_blob.write   = 0; // mx_write;
+  mx_blob.write   = 0;
 
   mxnogc_blob.magic = PL_BLOB_MAGIC;
   mxnogc_blob.flags = PL_BLOB_UNIQUE;
@@ -324,7 +316,7 @@ install_t install() {
   mxnogc_blob.acquire = 0; 
   mxnogc_blob.release = mxnogc_release;
   mxnogc_blob.compare = mx_compare;
-  mxnogc_blob.write   = 0; // mx_write;
+  mxnogc_blob.write   = 0;
 
   ws_blob.magic = PL_BLOB_MAGIC;
   ws_blob.flags = PL_BLOB_UNIQUE; 
@@ -428,15 +420,6 @@ int mx_compare(atom_t a, atom_t b) {
 
 int mxnogc_release(atom_t a) { return TRUE; }
 
-/* 
-// this requires some jiggery pokery to handle IOSTREAMS. 
-int mx_write(IOSTREAM *s, atom_t a, int flags) {
-  mxArray *p=ablob_to_mx(a);
-  fprintf(s,"<mx:%p>",p);
-}
-*/
-
-
 int ws_release(atom_t a) {
   struct wsvar *x=atom_to_wsvar(a);
   int rc;
@@ -457,13 +440,6 @@ int ws_release(atom_t a) {
   
   return rc;
 }
-
-/* see mx_write */
-//int ws_write(IOSTREAM *s, atom_t a, int flags) {
-//      struct wsvar *p=atom_to_wsvar(a);
-//      mxArray *p=ablob_to_mx(a);
-//      fprintf(s,"%s",p->name);
-//}
 
 
 /* Finds the engine associated with the given term
@@ -574,22 +550,18 @@ foreign_t mlWSAlloc(term_t eng, term_t blob) {
   x.engine = engine->ep;
   x.id     = engine->id;
 
-  {  lock l;
-	  if (engEvalString(x.engine, "uniquevar([])")) 
+  { lock l;
+	 if (engEvalString(engine->ep, "uniquevar([])")) 
 		  return raise_exception("eval_failed","uniquevar","none");
+	 if (strncmp(engine->outbuf,">> \nans =\n\nt_",13)!=0)
+		return raise_exception("bad_output_buffer","uniquevar",engine->outbuf);
+	 unsigned int len=strlen(engine->outbuf+11)-2;
+	 if (len+1>sizeof(x.name)) {
+		return raise_exception("name_too_long","uniquevar",engine->outbuf);
+	  }
+	 memcpy(x.name,engine->outbuf+11,len);
+	 x.name[len]=0;
   }
- 
-  if (strncmp(engine->outbuf,">> \nans =\n\nt_",13)!=0) {
-     //printf("\n** mlWSAlloc: output buffer looks bad: '%s'\n",engine->outbuf);
-	  return raise_exception("bad_output_buffer","uniquevar",engine->outbuf);
-  }
-
-	unsigned int len=strlen(engine->outbuf+11)-2;
-	if (len+1>sizeof(x.name)) {
-	  return raise_exception("name_too_long","uniquevar",engine->outbuf);
-	 }
-	memcpy(x.name,engine->outbuf+11,len);
-	x.name[len]=0;
 
   return PL_unify_blob(blob,&x,sizeof(x),&ws_blob);
 }
@@ -667,7 +639,7 @@ foreign_t mlExec(term_t engine, term_t cmd)
 	 	 delete [] eval_cmd;
 	}
 
-    if (rc) { throw PlException("mlExec: engEvalString failed."); }
+    if (rc) throw PlException("mlExec: engEvalString failed.");
 
 	 // EVALFMT starts with disp('#'). This means that the output buffer should
 	 // contain at least the 5 characters: ">> #\n". If they are not there,
@@ -680,11 +652,7 @@ foreign_t mlExec(term_t engine, term_t cmd)
 	 // write whatever is in the output buffer now, starting after the "#\n"
     displayOutput("| ", eng->outbuf+5);
 
-#ifdef ALT_LASTERR
-
-	 // --------------- ALTERNATIVE LASTERR SCHEME ------------------
-	 // call engine to eval lasterr, then scrape from output buffer: it's faster and easier.
-
+	 // call engine to eval lasterr, then scrape from output buffer
 	 rc=engEvalString(eng->ep,"lasterr");
 	 if (rc) { throw PlException("mlExec: unable to execute lasterr"); }
 	 if (strncmp(eng->outbuf,">> \nans =",9)!=0) {
@@ -708,41 +676,6 @@ foreign_t mlExec(term_t engine, term_t cmd)
 		check(PL_cons_functor(ex,mlerror,engine,desc,cmd));
 		throw PlException(ex);
     }
-
-#else
-
-	 // --------------- ORIGINAL LASTERR SCHEME ------------------
-	 // Execution puts lasterr into t__ex, then we use engGetVariable to
-	 // retrieve it.
-
-	 //printf(" - mlExec: output buffer: '%s'\n",eng->outbuf);
-    mxArray *lasterr = engGetVariable(eng->ep, "t__ex");
-	 //printf(" - mlExec: output buffer after: ++%s++\n",eng->outbuf);
-	 //printf(" - mlExec: Got last error (%p)               \r",lasterr); fflush(stdout);
-
-	 if (!lasterr) {
-		 fprintf(stderr,"\nplml: ** mlExec unable to get lasterr.\n");
-		 fprintf(stderr,"plml: ** mlExec output buffer contains: '%s'.\n",eng->outbuf);
-		 throw PlException("mlExec: unable to get lasterr");
-	 }
-    
-    if (mxGetNumberOfElements(lasterr)==0) mxDestroyArray(lasterr);
-	 else {
-		 char *string=mxArrayToString(lasterr);
-	    mxDestroyArray(lasterr);
-
-		term_t desc=PL_new_term_ref();
-		term_t cmd=PL_new_term_ref();
-		term_t ex=PL_new_term_ref();
-
-		PL_put_atom_chars(desc,string);
-		PL_put_atom_chars(cmd,cmdstr);
-		mxFree(string);
-		check(PL_cons_functor(ex,mlerror,engine,desc,cmd));
-		throw PlException(ex);
-		 
-	 } 
-#endif
 
 	 return TRUE;
   } catch (PlException &e) { 

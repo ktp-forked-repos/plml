@@ -1,23 +1,24 @@
 /*
-	Prolog-MATLAB interface - Version 2
-	Copyright Samer Abdallah (Queen Mary University of London; UCL) 2004-2015
- 
-	This program is free software; you can redistribute it and/or
-	modify it under the terms of the GNU General Public License
-	as published by the Free Software Foundation; either version 2
-	of the License, or (at your option) any later version.
+ * Part of plml: Prolog-Matlab interface
+ * Copyright Samer Abdallah (Queen Mary University of London) 2004-2015
+ *           Christophe Rhodes (Goldsmiths College University of London) 2005
+ *
+ *	This program is free software; you can redistribute it and/or
+ *	modify it under the terms of the GNU General Public License
+ *	as published by the Free Software Foundation; either version 2
+ *	of the License, or (at your option) any later version.
+ *
+ *	This program is distributed in the hope that it will be useful,
+ *	but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *	GNU General Public License for more details.
+ *
+ *	You should have received a copy of the GNU General Public
+ *	License along with this library; if not, write to the Free Software
+ *	Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ */
 
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public
-	License along with this library; if not, write to the Free Software
-	Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
- */ 
-
-/* 
+/*
  * These are some foreign for procedures to enable SWI Prolog to run
  * and communicate with a MATLAB computational engine, which is
  * started as a separate process on the local or a remote machine.
@@ -53,7 +54,9 @@
  *   A better solution would be to flip the management status of a given
  *   mx_blob atom as necessary.
  *
- * TODO
+ *
+ * - (See plmatlab.pl for comments about the syntax for Prolog-side
+ * users)
  *
  * - There is a problem if the Matlab script decides to pause - there
  * is apparently no way to communicate a keypress to the engine.
@@ -86,7 +89,7 @@
  *
  *      13/12/04: Removed all traces of old ws var handling code.
  *
- *      (Later changes may be found in the README file)
+ *      (Later changes may be found in the CHANGES file)
  */
 
 #include <SWI-cpp.h>
@@ -102,10 +105,9 @@ typedef __CHAR16_TYPE__ char16_t; // fix for Mavericks
 #include "engine.h"
 
 
-
 /* The maximum number of simultaneous connections to Matlab from one
    Prolog process. */
-#define MAXENGINES 8    
+#define MAXENGINES 8
 #define BUFSIZE  65536 // buffer for matlab output
 #define MAXCMDLEN 256
 
@@ -315,7 +317,7 @@ install_t install() {
   mx_blob.acquire = 0; 
   mx_blob.release = mx_release;
   mx_blob.compare = mx_compare;
-  mx_blob.write   = 0; 
+  mx_blob.write   = 0;
 
   mxnogc_blob.magic = PL_BLOB_MAGIC;
   mxnogc_blob.flags = PL_BLOB_UNIQUE;
@@ -323,7 +325,7 @@ install_t install() {
   mxnogc_blob.acquire = 0; 
   mxnogc_blob.release = mxnogc_release;
   mxnogc_blob.compare = mx_compare;
-  mxnogc_blob.write   = 0; 
+  mxnogc_blob.write   = 0;
 
   ws_blob.magic = PL_BLOB_MAGIC;
   ws_blob.flags = PL_BLOB_UNIQUE; 
@@ -461,13 +463,6 @@ int ws_release(atom_t a) {
   return rc;
 }
 
-/* see mx_write */
-//int ws_write(IOSTREAM *s, atom_t a, int flags) {
-//      struct wsvar *p=atom_to_wsvar(a);
-//      mxArray *p=ablob_to_mx(a);
-//      fprintf(s,"%s",p->name);
-//}
-
 
 /* Finds the engine associated with the given term
  * (which should just be an atom). Throws an exception
@@ -556,7 +551,6 @@ static int raise_exception(const char *msg, const char *loc, const char *info) {
 		  && PL_raise_exception(ex);
 }
 
-
 /* #include <mach/mach.h> */
 /* #include <mach/mach_time.h> */
 /* #include <unistd.h> */
@@ -572,22 +566,6 @@ static int raise_exception(const char *msg, const char *loc, const char *info) {
  * Workspace variable handling
  */
 
-static int make_ws_blob(class eng *engine, const char *name, unsigned int len, term_t blob) 
-{
-  struct wsvar x;
-
-  x.engine = engine->ep;
-  x.id     = engine->id;
-
-	if (len+1>sizeof(x.name)) {
-	  return raise_exception("name_too_long","uniquevar",name);
-	 }
-	memcpy(x.name,name,len);
-	x.name[len]=0;
-
-  return PL_unify_blob(blob,&x,sizeof(x),&ws_blob);
-}
-
 // This will create a new workspace variable with an unused name,
 // initialise it to an empty array (to reserve the name) and unify
 // the term (which must be a prolog variable) with a blob representing
@@ -600,17 +578,25 @@ foreign_t mlWSAlloc(term_t eng, term_t blob) {
   try { engine=findEngine(eng); }
   catch (PlException &ex) { return ex.plThrow(); }
 
-  {  lock l;
-	  if (engEvalString(engine->ep, "uniquevar([])")) 
+  struct wsvar x;
+
+  x.engine = engine->ep;
+  x.id     = engine->id;
+
+  { lock l;
+	 if (engEvalString(engine->ep, "uniquevar([])")) 
 		  return raise_exception("eval_failed","uniquevar","none");
-  }
- 
-  if (strncmp(engine->outbuf,">> \nans =\n\nt_",13)!=0) {
-	  return raise_exception("bad_output_buffer","uniquevar",engine->outbuf);
+	 if (strncmp(engine->outbuf,">> \nans =\n\nt_",13)!=0)
+		return raise_exception("bad_output_buffer","uniquevar",engine->outbuf);
+	 unsigned int len=strlen(engine->outbuf+11)-2;
+	 if (len+1>sizeof(x.name)) {
+		return raise_exception("name_too_long","uniquevar",engine->outbuf);
+	  }
+	 memcpy(x.name,engine->outbuf+11,len);
+	 x.name[len]=0;
   }
 
-	unsigned int len=strlen(engine->outbuf+11)-2;
-  return make_ws_blob(engine, engine->outbuf+11, len, blob);
+  return PL_unify_blob(blob,&x,sizeof(x),&ws_blob);
 }
 
 foreign_t mlWSName(term_t blob, term_t name, term_t engine) {
