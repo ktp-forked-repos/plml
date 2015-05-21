@@ -223,10 +223,12 @@ static eng engines[MAXENGINES];
 
 static pthread_mutex_t EngMutex;
 
+static void out(char c) { fputc(c,stderr); }
+
 class lock {
 public:
-	lock() { pthread_mutex_lock(&EngMutex); }
-	~lock() { pthread_mutex_unlock(&EngMutex); }
+	lock() { out('-'); pthread_mutex_lock(&EngMutex); out('('); }
+	~lock() { out(')'); pthread_mutex_unlock(&EngMutex); }
 };
 
 
@@ -429,7 +431,7 @@ int ws_release(atom_t a) {
   if (pthread_mutex_trylock(&EngMutex)==0) {
      rc=engEvalString(x->engine,buf) ? FALSE : TRUE; 
 	  pthread_mutex_unlock(&EngMutex);
-	} else {
+	} else { // failed to get mutex, try again later
 		rc=FALSE;
 	}
 
@@ -583,8 +585,7 @@ foreign_t mlWSName(term_t blob, term_t name, term_t engine) {
 foreign_t mlWSGet(term_t var, term_t val) {
   try { 
     struct wsvar *x = term_to_wsvar(var);
-	 lock l;
-    mxArray *p = engGetVariable(x->engine, x->name);
+	 { lock l; mxArray *p = engGetVariable(x->engine, x->name); }
 	 if (p) return PL_unify_blob(val, (void **)&p, sizeof(p), &mx_blob);
 	 else {
 		 return raise_exception("get_variable_failed","mlWSGET",x->name);
