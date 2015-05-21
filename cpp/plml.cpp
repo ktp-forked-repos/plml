@@ -96,6 +96,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <queue>
 
 #ifdef __CHAR16_TYPE__
 typedef __CHAR16_TYPE__ char16_t; // fix for Mavericks
@@ -110,6 +111,7 @@ typedef __CHAR16_TYPE__ char16_t; // fix for Mavericks
 #define BUFSIZE  65536 // buffer for matlab output
 #define MAXCMDLEN 256
 #define EVALFMT "lasterr('');disp('#');%s"
+#define MAX_RELEASE_QUEUE 2000
 
 /* using namespace std; */
 
@@ -157,11 +159,16 @@ static mxArray *ablob_to_mx(atom_t a) {
 
 static PL_blob_t ws_blob;
 
+class eng; // forward declaration
+
 // structure for keeping track of workspace variables
 struct wsvar {
   char name[8]; // designed for short machine generated names
-  Engine *engine; // the matlab engine which owns this variable
-  atom_t id;    // the id of this engine
+  eng  *engine; // the engine object which owns this variable
+};
+
+struct wsname {
+  char name[8]; // designed for short machine generated names
 };
 
 // extract wsvar from blob term
@@ -182,6 +189,30 @@ static struct wsvar *atom_to_wsvar(atom_t a) {
   return term_to_wsvar(PlTerm(PlAtom(a)));
 }
 
+// Mutexes to protect engines and WS var release queues
+static pthread_mutex_t EngMutex, QueueMutex;
+
+static void out(char c) {
+	fputc(c,stderr);
+}
+class lock {
+public:
+	lock() { out('-'); pthread_mutex_lock(&EngMutex); out('('); }
+	~lock() { out(')'); pthread_mutex_unlock(&EngMutex); }
+};
+
+class qlock {
+public:
+	qlock() { out('='); pthread_mutex_lock(&QueueMutex); out('['); }
+	~qlock() { out(']'); pthread_mutex_unlock(&QueueMutex); }
+};
+
+char *append_at(char *p, const char *str) {
+  int n=strlen(str);
+  memcpy(p,str,n);
+  p+=n;
+  return p;
+}
 
 /* MATLAB engine wrapper class */
 class eng {
@@ -190,9 +221,60 @@ public:
   Engine *ep;   // MATLAB API engine pointer
   atom_t id;    // atom associated with this engine
   char *outbuf; // buffer for textual output from MATLAB
+  std::queue<struct wsname> gcqueue; 
         
   eng(): ep(NULL), id(PL_new_atom("")), outbuf(NULL) { magic="mleng"; }
-        
+
+  int enqueue_for_release(const struct wsname& nm) {
+    qlock l; 
+	 if (gcqueue.size()>=MAX_RELEASE_QUEUE) { return FALSE; } // queue full
+	 else { gcqueue.push(nm); return TRUE; }
+  }
+
+  void flush_release_queue_batched() {
+	 // NB. must be called with EngMutex held.
+	 if (!gcqueue.empty()) {
+		char	buf[256], *p0=append_at(buf,"clear"), *pp;
+		int	bad=0, n;
+		qlock l;
+
+		pp=p0; n=0;
+		do {
+		  pp=append_at(append_at(pp," "),gcqueue.front().name); 
+		  gcqueue.pop(); n++;
+		  if (n>=24) {
+			 *pp=0;
+			 if (engEvalString(ep,buf)!=0) bad++; 
+			 pp=p0; n=0;
+		  }
+		} while (!gcqueue.empty());
+		if (n>0) {
+		  *pp=0;
+		  if (engEvalString(ep,buf)!=0) bad++; 
+		}
+
+		if (bad>0) fprintf(stderr,"plml: Failed to release %d batches of workspace variables.\n",bad);
+	 }
+  }
+
+  void flush_release_queue() {
+	 // NB. must be called with EngMutex held.
+	 if (!gcqueue.empty()) {
+		char buf[16];
+		int	bad=0;
+		qlock l;
+
+		// fprintf(stderr,"plml: Releasing %d workspace variables.\n",gcqueue.size());
+		do {
+		  sprintf(buf,"clear %s",gcqueue.front().name);
+		  if (engEvalString(ep,buf)!=0) bad++; 
+		  gcqueue.pop();
+		} while (!gcqueue.empty());
+
+		if (bad>0) fprintf(stderr,"plml: Failed to release %d workspace variables.\n",bad);
+	 }
+  }
+
   void open(const char *cmd, atom_t id) {
     ep=engOpen(cmd);
     
@@ -220,14 +302,6 @@ public:
 // pool of engines, all initially closed
 static eng engines[MAXENGINES]; 
 // functor to be used to wrap array pointers
-
-static pthread_mutex_t EngMutex;
-
-class lock {
-public:
-	lock() { pthread_mutex_lock(&EngMutex); }
-	~lock() { pthread_mutex_unlock(&EngMutex); }
-};
 
 
 extern "C" {
@@ -422,23 +496,10 @@ int mxnogc_release(atom_t a) { return TRUE; }
 
 int ws_release(atom_t a) {
   struct wsvar *x=atom_to_wsvar(a);
-  int rc;
+  struct wsname nm;
   
-  char buf[16];
-  sprintf(buf,"clear %s",x->name);
-  if (pthread_mutex_trylock(&EngMutex)==0) {
-     rc=engEvalString(x->engine,buf) ? FALSE : TRUE; 
-	  pthread_mutex_unlock(&EngMutex);
-	} else {
-		rc=FALSE;
-	}
-
-	if (rc) {
-	  x->name[0]=0;
-	  x->engine=0;
-  } 
-  
-  return rc;
+  memcpy(nm.name,x->name,sizeof(nm.name));
+  return x->engine->enqueue_for_release(nm);
 }
 
 
@@ -547,8 +608,7 @@ foreign_t mlWSAlloc(term_t eng, term_t blob) {
 
   struct wsvar x;
 
-  x.engine = engine->ep;
-  x.id     = engine->id;
+  x.engine = engine;
 
   { lock l;
 	 if (engEvalString(engine->ep, "uniquevar([])")) 
@@ -572,7 +632,7 @@ foreign_t mlWSName(term_t blob, term_t name, term_t engine) {
   try {
     struct wsvar *x = term_to_wsvar(blob);
     return ( PL_unify_atom_chars(name, x->name)
-			&& PL_unify_atom(engine, x->id));
+			&& PL_unify_atom(engine, x->engine->id));
   } catch (PlException &e) {
     PL_fail; // return e.plThrow(); 
   }
@@ -584,7 +644,7 @@ foreign_t mlWSGet(term_t var, term_t val) {
   try { 
     struct wsvar *x = term_to_wsvar(var);
 	 lock l;
-    mxArray *p = engGetVariable(x->engine, x->name);
+    mxArray *p = engGetVariable(x->engine->ep, x->name);
 	 if (p) return PL_unify_blob(val, (void **)&p, sizeof(p), &mx_blob);
 	 else {
 		 return raise_exception("get_variable_failed","mlWSGET",x->name);
@@ -600,7 +660,7 @@ foreign_t mlWSPut(term_t var, term_t val) {
   try { 
     struct wsvar *x=term_to_wsvar(var);
 	 lock   l;
-    return engPutVariable(x->engine, x->name, term_to_mx(val)) ? FALSE : TRUE;
+    return engPutVariable(x->engine->ep, x->name, term_to_mx(val)) ? FALSE : TRUE;
   } catch (PlException &e) { 
     return e.plThrow(); 
   }
@@ -620,6 +680,8 @@ foreign_t mlExec(term_t engine, term_t cmd)
 	 int	rc;
 	 lock l;
     
+	 eng->flush_release_queue_batched();
+
     // if string is very long, send it via local mxArray
     if (cmdlen>MAXCMDLEN) {
       mxArray *mxcmd=mxCreateString(cmdstr);
