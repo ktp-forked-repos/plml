@@ -585,7 +585,8 @@ foreign_t mlWSName(term_t blob, term_t name, term_t engine) {
 foreign_t mlWSGet(term_t var, term_t val) {
   try { 
     struct wsvar *x = term_to_wsvar(var);
-	 { lock l; mxArray *p = engGetVariable(x->engine, x->name); }
+	 mxArray *p;
+	 { lock l; p = engGetVariable(x->engine, x->name); }
 	 if (p) return PL_unify_blob(val, (void **)&p, sizeof(p), &mx_blob);
 	 else {
 		 return raise_exception("get_variable_failed","mlWSGET",x->name);
