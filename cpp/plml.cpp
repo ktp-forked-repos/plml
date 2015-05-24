@@ -495,11 +495,15 @@ int mx_compare(atom_t a, atom_t b) {
 int mxnogc_release(atom_t a) { return TRUE; }
 
 int ws_release(atom_t a) {
+  out('{');
   struct wsvar *x=atom_to_wsvar(a);
   struct wsname nm;
+  int rc;
   
   memcpy(nm.name,x->name,sizeof(nm.name));
-  return x->engine->enqueue_for_release(nm);
+  rc=x->engine->enqueue_for_release(nm);
+  out('}');
+  return rc;
 }
 
 
@@ -603,8 +607,9 @@ foreign_t mlWSAlloc(term_t eng, term_t blob) {
   // if varname is already bound, we should check
   // that the name has not been used in the workspace
   class eng *engine;
+  out('{');
   try { engine=findEngine(eng); }
-  catch (PlException &ex) { return ex.plThrow(); }
+  catch (PlException &ex) { out('}'); return ex.plThrow(); }
 
   struct wsvar x;
 
@@ -622,8 +627,9 @@ foreign_t mlWSAlloc(term_t eng, term_t blob) {
 	 memcpy(x.name,engine->outbuf+11,len);
 	 x.name[len]=0;
   }
-
-  return PL_unify_blob(blob,&x,sizeof(x),&ws_blob);
+  int rc=PL_unify_blob(blob,&x,sizeof(x),&ws_blob);
+	out('}');
+	return rc;
 }
 
 foreign_t mlWSName(term_t blob, term_t name, term_t engine) {
@@ -673,6 +679,7 @@ foreign_t mlWSPut(term_t var, term_t val) {
 // Call a Matlab engine to execute the given command
 foreign_t mlExec(term_t engine, term_t cmd) 
 {
+	out('{');
   try {
     eng *eng=findEngine(engine);
 	 const char *cmdstr=get_utf8_string_from_term(cmd);
@@ -738,10 +745,10 @@ foreign_t mlExec(term_t engine, term_t cmd)
 		check(PL_cons_functor(ex,mlerror,engine,desc,cmd));
 		throw PlException(ex);
     }
-
+	out('}');
 	 return TRUE;
   } catch (PlException &e) { 
-    return e.plThrow(); 
+    out('}'); return e.plThrow(); 
   }
 }
 
