@@ -97,6 +97,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <queue>
+#include <sstream>
 
 #ifdef __CHAR16_TYPE__
 typedef __CHAR16_TYPE__ char16_t; // fix for Mavericks
@@ -131,9 +132,40 @@ typedef int mwSize;
 typedef int mwIndex;
 #endif
 
+#ifdef DEBUG
+# define out(c) fputc(c,stderr)
+#else
+# define out(c)
+#endif
+
+/* 
+// debugging aid
+class bracket {
+public:
+	bracket(char c){ out('{'); out(c); }
+	bracket(){ out('{'); }
+	~bracket() { out('}'); }
+};
+*/
+
 static PL_blob_t mx_blob;
 static PL_blob_t mxnogc_blob;
 static functor_t mlerror;
+
+// extract a blob from atom
+static void atom_to_blob(atom_t a, void **pdata, PL_blob_t **ptype) { 
+  size_t    len;
+
+  *pdata=PL_blob_data(a, &len, ptype);
+  if (*pdata == NULL) throw PlException("Could not get blob data");
+}
+
+void blob_type_mismatch(const char *expected, const char *found)
+{
+  std::ostringstream ss;
+  ss << "Blob type mismatch: expecting " << expected << ", got " << found;
+  throw PlException(ss.str().c_str());
+}
 
 // Extract an mxArray * from a BLOB atom
 static mxArray *term_to_mx(term_t t) {
@@ -142,14 +174,17 @@ static mxArray *term_to_mx(term_t t) {
   void *p;
   
   PL_get_blob(t, &p, &len, &type);
-  if (type != &mx_blob && type != &mxnogc_blob) {
-    throw PlException("Not an mx variable"); 
-  }
+  if (type != &mx_blob && type != &mxnogc_blob) blob_type_mismatch("mx or mxnogc",type->name);
   return *(mxArray **) p;
 }
 
 static mxArray *ablob_to_mx(atom_t a) { 
-  return term_to_mx(PlTerm(PlAtom(a))); 
+  PL_blob_t *t;
+  mxArray **p;
+
+  atom_to_blob(a,(void **)&p,&t);
+  if (t!=&mx_blob && t!=&mxnogc_blob) blob_type_mismatch("mx or mxnogc",t->name);
+  return *p;
 }
 
 // This is for a SWI Prolog BLOB type to manage Matlab workspace
@@ -171,6 +206,21 @@ struct wsname {
   char name[8]; // designed for short machine generated names
 };
 
+// Mutexes to protect engines and WS var release queues
+static pthread_mutex_t EngMutex, QueueMutex;
+
+class lock {
+public:
+  lock() { out('-'); pthread_mutex_lock(&EngMutex); out('('); }
+  ~lock() { out(')'); pthread_mutex_unlock(&EngMutex); }
+};
+
+class qlock {
+public:
+  qlock() { out('='); pthread_mutex_lock(&QueueMutex); out('['); }
+  ~qlock() { out(']'); pthread_mutex_unlock(&QueueMutex); }
+};
+
 // extract wsvar from blob term
 static struct wsvar *term_to_wsvar(term_t t) {
   PL_blob_t *type;
@@ -178,34 +228,9 @@ static struct wsvar *term_to_wsvar(term_t t) {
   void *p;
   
   PL_get_blob(t, &p, &len, &type);
-  if (type != &ws_blob) {
-    throw PlException("Not a ws variable"); 
-  }
-  return (struct wsvar *) p;
+  if (type != &ws_blob) blob_type_mismatch("ws",type->name);
+  return (struct wsvar *)p;
 }
-
-// extract wsvar from atom by converting to term first
-static struct wsvar *atom_to_wsvar(atom_t a) { 
-  return term_to_wsvar(PlTerm(PlAtom(a)));
-}
-
-// Mutexes to protect engines and WS var release queues
-static pthread_mutex_t EngMutex, QueueMutex;
-
-static void out(char c) {
-	fputc(c,stderr);
-}
-class lock {
-public:
-	lock() { out('-'); pthread_mutex_lock(&EngMutex); out('('); }
-	~lock() { out(')'); pthread_mutex_unlock(&EngMutex); }
-};
-
-class qlock {
-public:
-	qlock() { out('='); pthread_mutex_lock(&QueueMutex); out('['); }
-	~qlock() { out(']'); pthread_mutex_unlock(&QueueMutex); }
-};
 
 char *append_at(char *p, const char *str) {
   int n=strlen(str);
@@ -254,24 +279,6 @@ public:
 		}
 
 		if (bad>0) fprintf(stderr,"plml: Failed to release %d batches of workspace variables.\n",bad);
-	 }
-  }
-
-  void flush_release_queue() {
-	 // NB. must be called with EngMutex held.
-	 if (!gcqueue.empty()) {
-		char buf[16];
-		int	bad=0;
-		qlock l;
-
-		// fprintf(stderr,"plml: Releasing %d workspace variables.\n",gcqueue.size());
-		do {
-		  sprintf(buf,"clear %s",gcqueue.front().name);
-		  if (engEvalString(ep,buf)!=0) bad++; 
-		  gcqueue.pop();
-		} while (!gcqueue.empty());
-
-		if (bad>0) fprintf(stderr,"plml: Failed to release %d workspace variables.\n",bad);
 	 }
   }
 
@@ -495,15 +502,14 @@ int mx_compare(atom_t a, atom_t b) {
 int mxnogc_release(atom_t a) { return TRUE; }
 
 int ws_release(atom_t a) {
-  out('{');
-  struct wsvar *x=atom_to_wsvar(a);
+  struct wsvar *x;
   struct wsname nm;
-  int rc;
+  PL_blob_t *type;
   
+  atom_to_blob(a,(void **)&x,&type);
+  if (type!=&ws_blob) return FALSE;
   memcpy(nm.name,x->name,sizeof(nm.name));
-  rc=x->engine->enqueue_for_release(nm);
-  out('}');
-  return rc;
+  return x->engine->enqueue_for_release(nm);
 }
 
 
@@ -607,9 +613,8 @@ foreign_t mlWSAlloc(term_t eng, term_t blob) {
   // if varname is already bound, we should check
   // that the name has not been used in the workspace
   class eng *engine;
-  out('{');
   try { engine=findEngine(eng); }
-  catch (PlException &ex) { out('}'); return ex.plThrow(); }
+  catch (PlException &ex) { return ex.plThrow(); }
 
   struct wsvar x;
 
@@ -627,9 +632,7 @@ foreign_t mlWSAlloc(term_t eng, term_t blob) {
 	 memcpy(x.name,engine->outbuf+11,len);
 	 x.name[len]=0;
   }
-  int rc=PL_unify_blob(blob,&x,sizeof(x),&ws_blob);
-	out('}');
-	return rc;
+  return PL_unify_blob(blob,&x,sizeof(x),&ws_blob);
 }
 
 foreign_t mlWSName(term_t blob, term_t name, term_t engine) {
@@ -679,7 +682,6 @@ foreign_t mlWSPut(term_t var, term_t val) {
 // Call a Matlab engine to execute the given command
 foreign_t mlExec(term_t engine, term_t cmd) 
 {
-	out('{');
   try {
     eng *eng=findEngine(engine);
 	 const char *cmdstr=get_utf8_string_from_term(cmd);
@@ -745,10 +747,9 @@ foreign_t mlExec(term_t engine, term_t cmd)
 		check(PL_cons_functor(ex,mlerror,engine,desc,cmd));
 		throw PlException(ex);
     }
-	out('}');
 	 return TRUE;
   } catch (PlException &e) { 
-    out('}'); return e.plThrow(); 
+    return e.plThrow(); 
   }
 }
 
@@ -1109,4 +1110,5 @@ foreign_t mlMxNewRefGC(term_t in, term_t out)
  * indent-tabs-mode: nil
  * End:
  */
+/* vim: set sw=2 ts=2 softtabstop=2 : */
 
