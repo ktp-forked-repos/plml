@@ -114,3 +114,16 @@
 	Now using library(debug) for debugging messages. Added more helpful
 	message if foreign library fails to load.
 
+2015-01-25
+	Fixed another obscure locking up bug. This was again due to garbage collection.
+	GC was being initiated due to running out of stack space, but the ws_release(),
+	the function used to release a workspace variable, was creating new
+	Prolog terms in order to get data out of a ws_blob atom. The solution was
+	to use PL_blob_data() instead of PL_get_blob(). PL_blob_data() uses
+	atom_t directly.
+
+	Also, the workspace variable garbage collection now works by adding the
+	WS variable to a release queue (a quick, short operation, no need to grab
+	Matlab engine lock). Commands to clear variables are sent to the Matlab 
+	process the next time a command is executed. Many variables are cleared
+	at once, so this is quicker now.
