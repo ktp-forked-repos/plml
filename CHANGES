@@ -114,7 +114,7 @@
 	Now using library(debug) for debugging messages. Added more helpful
 	message if foreign library fails to load.
 
-2015-01-25
+2015-01-25 v1.4.0
 	Fixed another obscure locking up bug. This was again due to garbage collection.
 	GC was being initiated due to running out of stack space, but the ws_release(),
 	the function used to release a workspace variable, was creating new
@@ -127,3 +127,13 @@
 	Matlab engine lock). Commands to clear variables are sent to the Matlab 
 	process the next time a command is executed. Many variables are cleared
 	at once, so this is quicker now.
+
+2015-01-25 v1.4.1
+	WS blob garbage collection is now non-blocking: if the queue mutex
+	is held, then we just skip that blob, SWI will try to release it
+	again later.
+
+	Added a couple of configuration options to Makefile. In particular,
+	defining NOLOCK removes the mutex that protects the Matlab engine.
+	If you are sure that library will only be called in one thread,
+	then you can rebuild with this enabled.

@@ -1,3 +1,11 @@
+# ---------- CONFIGURATION ----------
+# comment in and rebuild to debug mutexes
+#CFLAGS+=-DDEBUG
+
+# comment in and rebuild to get remove mutex protection from engine access
+#CFLAGS+=-DNOLOCK
+# ------ END OF CONFIGURATION -------
+
 MATLAB=$(shell matlab -e | grep MATLAB= | sed -e "s/MATLAB=//")
 MLARCH=$(shell matlab -e | grep ^ARCH= | sed -e "s/ARCH=//")
 

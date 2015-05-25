@@ -249,6 +249,16 @@ in a straight line plot.
 	% ...
 	?- ?? plot(1:10).
 
+### BUILD OPTIONS
+
+There are two configuration options in the Makefile. If you enable DEBUG mode
+and rebuild, then the library will print a series of cryptic characters as
+it aquires and releases the mutexes protecting the WS variable release queue
+and the Matlab engine.
+
+If you enable NOLOCK, the mutex protecting the Matlab engine will be disabled.
+You might want this if you are sure that the library is going to be called in a
+single threaded way, but probably any performance gain will be miniscule.
 
 ## ACKNOWLEDGMENTS
 

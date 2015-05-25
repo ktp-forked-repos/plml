@@ -138,6 +138,12 @@ typedef int mwIndex;
 # define out(c)
 #endif
 
+#ifdef NOLOCK
+# define LOCK 
+#else
+# define LOCK lock l
+#endif
+
 /* 
 // debugging aid
 class bracket {
@@ -221,6 +227,13 @@ public:
   ~qlock() { out(']'); pthread_mutex_unlock(&QueueMutex); }
 };
 
+class qlock_nb {
+public:
+	class busy {};
+  qlock_nb() { if (!pthread_mutex_trylock(&QueueMutex)) throw busy(); out('['); }
+  ~qlock_nb() { pthread_mutex_unlock(&QueueMutex); out(']'); }
+};
+
 // extract wsvar from blob term
 static struct wsvar *term_to_wsvar(term_t t) {
   PL_blob_t *type;
@@ -251,9 +264,13 @@ public:
   eng(): ep(NULL), id(PL_new_atom("")), outbuf(NULL) { magic="mleng"; }
 
   int enqueue_for_release(const struct wsname& nm) {
-    qlock l; 
-	 if (gcqueue.size()>=MAX_RELEASE_QUEUE) { return FALSE; } // queue full
-	 else { gcqueue.push(nm); return TRUE; }
+    try { // non-blocking attempt to grab mutex
+			qlock_nb l; 
+			if (gcqueue.size()>=MAX_RELEASE_QUEUE) { return FALSE; } // queue full
+			else { gcqueue.push(nm); return TRUE; }
+		} catch (qlock_nb::busy x) { // if busy, then just fail
+			return FALSE;
+		}
   }
 
   void flush_release_queue_batched() {
@@ -267,7 +284,7 @@ public:
 		do {
 		  pp=append_at(append_at(pp," "),gcqueue.front().name); 
 		  gcqueue.pop(); n++;
-		  if (n>=24) {
+		  if (n>=30) { // "clear " + 30*8 < 256 = sizeof(buf)
 			 *pp=0;
 			 if (engEvalString(ep,buf)!=0) bad++; 
 			 pp=p0; n=0;
@@ -620,7 +637,7 @@ foreign_t mlWSAlloc(term_t eng, term_t blob) {
 
   x.engine = engine;
 
-  { lock l;
+  { LOCK;
 	 if (engEvalString(engine->ep, "uniquevar([])")) 
 		  return raise_exception("eval_failed","uniquevar","none");
 	 if (strncmp(engine->outbuf,">> \nans =\n\nt_",13)!=0)
@@ -653,7 +670,7 @@ foreign_t mlWSGet(term_t var, term_t val) {
   try { 
     struct wsvar *x = term_to_wsvar(var);
 		mxArray *p;
-		{ lock l; p = engGetVariable(x->engine->ep, x->name); }
+		{ LOCK; p = engGetVariable(x->engine->ep, x->name); }
 		if (p) return PL_unify_blob(val, (void **)&p, sizeof(p), &mx_blob);
 		else {
 			return raise_exception("get_variable_failed","mlWSGET",x->name);
@@ -687,7 +704,7 @@ foreign_t mlExec(term_t engine, term_t cmd)
 	 const char *cmdstr=get_utf8_string_from_term(cmd);
 	 int	cmdlen=strlen(cmdstr);
 	 int	rc;
-	 lock l;
+	 LOCK;
     
 	 eng->flush_release_queue_batched();
 
