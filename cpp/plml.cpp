@@ -100,7 +100,7 @@
 #include <sstream>
 
 #ifdef __CHAR16_TYPE__
-typedef __CHAR16_TYPE__ char16_t; // fix for Mavericks
+//typedef __CHAR16_TYPE__ char16_t; // fix for Mavericks
 #endif
 
 #include "engine.h"
@@ -321,6 +321,11 @@ public:
   
   bool matches(atom_t id) const { return id==this->id; }
   bool isOpen() const { return ep!=NULL; }
+
+	int skip_blanks(int skip) {
+		while(strncmp(outbuf+skip,">> \n",4)==0) skip+=4;
+		return skip;
+	}
 };
 
 // pool of engines, all initially closed
@@ -634,19 +639,24 @@ foreign_t mlWSAlloc(term_t eng, term_t blob) {
   catch (PlException &ex) { return ex.plThrow(); }
 
   struct wsvar x;
+	int    skip;
 
   x.engine = engine;
 
   { LOCK;
 	 if (engEvalString(engine->ep, "uniquevar([])")) 
 		  return raise_exception("eval_failed","uniquevar","none");
-	 if (strncmp(engine->outbuf,">> \nans =\n\nt_",13)!=0)
+	 // skip blank lines (see mlExec())
+	 skip=engine->skip_blanks(0);
+
+	 if (strncmp(engine->outbuf+skip,"ans =\n\nt_",9)!=0)
 		return raise_exception("bad_output_buffer","uniquevar",engine->outbuf);
-	 unsigned int len=strlen(engine->outbuf+11)-2;
+   else skip+=7;
+	 unsigned int len=strlen(engine->outbuf+skip)-2;
 	 if (len+1>sizeof(x.name)) {
-		return raise_exception("name_too_long","uniquevar",engine->outbuf);
+		return raise_exception("name_too_long","uniquevar",engine->outbuf+skip);
 	  }
-	 memcpy(x.name,engine->outbuf+11,len);
+	 memcpy(x.name,engine->outbuf+skip,len);
 	 x.name[len]=0;
   }
   return PL_unify_blob(blob,&x,sizeof(x),&ws_blob);
@@ -703,7 +713,7 @@ foreign_t mlExec(term_t engine, term_t cmd)
     eng *eng=findEngine(engine);
 	 const char *cmdstr=get_utf8_string_from_term(cmd);
 	 int	cmdlen=strlen(cmdstr);
-	 int	rc;
+	 int	rc, skip;
 	 LOCK;
     
 	 eng->flush_release_queue_batched();
@@ -729,32 +739,42 @@ foreign_t mlExec(term_t engine, term_t cmd)
 
     if (rc) throw PlException("mlExec: engEvalString failed.");
 
+	 // If user has used Ctrl-C to break out of a Prolog goal while not inside
+	 // a Matlab call, the output buffer may contain extra lines of ">> ". If so
+	 // we should skip these.
+	 skip=eng->skip_blanks(0);
+
 	 // EVALFMT starts with disp('#'). This means that the output buffer should
 	 // contain at least the 5 characters: ">> #\n". If they are not there,
 	 // something is terribly wrong and we must throw an exeption to avoid
 	 // locking up in triserver.
-    if (strncmp(eng->outbuf,">> #\n",5)!=0) {
+    if (strncmp(eng->outbuf+skip,">> #\n",5)!=0) {
 		 throw PlException(PlCompound("bad_output_buffer",PlTermv("exec",eng->outbuf)));
-	 }
+	 } else skip+=5;
 	
 	 // write whatever is in the output buffer now, starting after the "#\n"
-    displayOutput("| ", eng->outbuf+5);
+    displayOutput("| ", eng->outbuf+skip);
 
 	 // call engine to eval lasterr, then scrape from output buffer
 	 rc=engEvalString(eng->ep,"lasterr");
 	 if (rc) { throw PlException("mlExec: unable to execute lasterr"); }
-	 if (strncmp(eng->outbuf,">> \nans =",9)!=0) {
-		 throw PlException(PlCompound("bad_output_buffer",PlTermv("lasterr",eng->outbuf)));
-	 }
 
-	 if (strncmp(eng->outbuf+11,"     ''",7)!=0) {
-		int len=strlen(eng->outbuf+11)-2;
+	 // skip lines like ">> " again
+	 skip=eng->skip_blanks(0);
+
+	 if (strncmp(eng->outbuf+skip,"ans =",5)!=0) {
+		 throw PlException(PlCompound("bad_output_buffer",PlTermv("lasterr",eng->outbuf)));
+	 } else skip+=5;
+	 skip+=2;
+
+	 if (strncmp(eng->outbuf+skip,"     ''",7)!=0) {
+		int len=strlen(eng->outbuf+skip)-2;
 		char *lasterr= new char[len+1];
 		term_t desc=PL_new_term_ref();
 		term_t cmd=PL_new_term_ref();
 		term_t ex=PL_new_term_ref();
 
-		memcpy(lasterr,eng->outbuf+11,len);
+		memcpy(lasterr,eng->outbuf+skip,len);
 		lasterr[len]=0;
 
 		PL_put_atom_chars(desc,lasterr);

@@ -24,4 +24,6 @@ shift 2
 
 echo "### $(date): INPUT - $@" >> "$inputlog"
 echo "### $(date): OUTPUT - $@" >> "$outputlog"
-nohup tee -a "$inputlog" | "$@" | nohup tee -a "$outputlog"
+#nohup tee -a "$inputlog" | "$@" | nohup tee -a "$outputlog"
+tee -i -a "$inputlog" | "$@" | tee -i -a "$outputlog"
+echo "### $(date): EXIT STATUS - $?" >> "$outputlog"

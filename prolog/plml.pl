@@ -341,21 +341,20 @@ ml_open(Id,Host) :- ml_open(Id,Host,[]).
 ml_open(Id,Host,Options) :- 
 	ground(Id),
    pack_dir(PackDir), % needed to locate package files
-	options_flags(Options,Flags),
 	option(cmd(Bin),Options,matlab),
-	(	(Host=localhost;hostname(Host))
-	-> format(atom(Exec),'exec ~w',[Bin]) % using exec fixes Ctrl-C bug 
-	;	format(atom(Exec),'ssh ~w ~w',[Host,Bin])
-	),
+   (	(Host=localhost;hostname(Host)) -> Exec1=Bin
+   ;	format(string(Exec1),'ssh ~w ~w',[Host,Bin])
+   ),
 	(	member(debug(In,Out),Options)
 	-> debug(plml,'Running Matlab with protocol logging.',[]),
 		debug(plml,'| Prolog > Matlab logged to "~w"',[In]),
 		debug(plml,'| Prolog < Matlab logged to "~w"',[Out]),
 		absolute_file_name(PackDir/scripts/logio,Spy,[access(execute)]),
-		format(atom(Exec1),'~w ~w ~w ~w',[Spy,In,Out,Exec])
-	;	Exec1=Exec
+		format(atom(Exec),'~w ~w ~w ~w',[Spy,In,Out,Exec1])
+	;  Exec=Exec1
 	),
-	format(atom(Cmd),'~w ~w',[Exec1,Flags]),
+	options_flags(Options,Flags),
+	format(atom(Cmd),'exec ~w ~w',[Exec,Flags]), % using exec fixes Ctrl-C bug 
 	debug(plml,'About to start Matlab with: ~w',[Cmd]),
 	mlOPEN(Cmd,Id),
    getenv('LANG',Lang),
