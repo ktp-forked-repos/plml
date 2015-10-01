@@ -109,9 +109,9 @@
 /* The maximum number of simultaneous connections to Matlab from one
    Prolog process. */
 #define MAXENGINES 8
-#define BUFSIZE  65536 // buffer for matlab output
+#define BUFSIZE  65535 // buffer for matlab output
 #define MAXCMDLEN 256
-#define EVALFMT "lasterr('');disp('#');%s"
+#define EVALFMT "lasterr('');disp('{');%s;disp('}')"
 #define MAX_RELEASE_QUEUE 2000
 
 /* using namespace std; */
@@ -304,10 +304,10 @@ public:
     
     if (ep) {
       this->id=id;
-      outbuf=new char[BUFSIZE];
-      outbuf[BUFSIZE-1]=0;
-      engOutputBuffer(ep,outbuf,BUFSIZE-1);
-      fprintf(stderr,"plml: Matlab engine (%s) open.\n",PL_atom_chars(id));
+      outbuf=new char[BUFSIZE+1];
+      outbuf[BUFSIZE]=0;
+      engOutputBuffer(ep,outbuf,BUFSIZE);
+      //fprintf(stderr,"plml: Matlab engine (%s) open.\n",PL_atom_chars(id));
     } else {
       throw PlException("open engine failed");
     }
@@ -557,7 +557,8 @@ static void displayOutput(const char *prefix,const char *p)
 	while (*p) {
 		fputs(prefix,stderr); 
 		while (*p && *p!='\n') fputc(*p++,stderr); 
-		fputc('\n',stderr); if (*p) p++;
+		if (*p) p++; else fputs(prefix,stderr);
+		fputc('\n',stderr); 
 	}
 }
 
@@ -622,6 +623,10 @@ static int raise_exception(const char *msg, const char *loc, const char *info) {
 		  && PL_raise_exception(ex);
 }
 
+static int raise_exception(const char *msg, const char *loc) {
+	return raise_exception(msg,loc,"none");
+}
+
 /*
  * Workspace variable handling
  */
@@ -650,7 +655,7 @@ foreign_t mlWSAlloc(term_t eng, term_t blob) {
 	 skip=engine->skip_blanks(0);
 
 	 if (strncmp(engine->outbuf+skip,"ans =\n\nt_",9)!=0)
-		return raise_exception("bad_output_buffer","uniquevar",engine->outbuf);
+		return raise_exception("bad_output_buffer","uniquevar",engine->outbuf+skip);
    else skip+=7;
 	 unsigned int len=strlen(engine->outbuf+skip)-2;
 	 if (len+1>sizeof(x.name)) {
@@ -744,16 +749,26 @@ foreign_t mlExec(term_t engine, term_t cmd)
 	 // we should skip these.
 	 skip=eng->skip_blanks(0);
 
-	 // EVALFMT starts with disp('#'). This means that the output buffer should
-	 // contain at least the 5 characters: ">> #\n". If they are not there,
-	 // something is terribly wrong and we must throw an exeption to avoid
-	 // locking up in triserver.
-    if (strncmp(eng->outbuf+skip,">> #\n",5)!=0) {
-		 throw PlException(PlCompound("bad_output_buffer",PlTermv("exec",eng->outbuf)));
+	 // EVALFMT starts with disp('{'). This means that the output buffer should
+	 // contain at least the 5 characters: ">> {". If they are not there,
+	 // something is terribly wrong and we must throw an exeption.
+    if (strncmp(eng->outbuf+skip,">> {\n",5)!=0) {
+		 throw PlException(PlCompound("bad_output_buffer",PlTermv("exec",eng->outbuf+skip)));
 	 } else skip+=5;
 	
-	 // write whatever is in the output buffer now, starting after the "#\n"
-    displayOutput("| ", eng->outbuf+skip);
+	 // check that "}\n" is present and end of output if no buffer overflow
+	 {	int len=strlen(eng->outbuf+skip);	
+			if (len+skip<BUFSIZE) {
+			  char *trailer_pos=eng->outbuf+skip+len-2;
+				if (strncmp(trailer_pos,"}\n",2)!=0) throw PlException("plml_interrupted");
+			  *trailer_pos=0;
+			  displayOutput("| ", eng->outbuf+skip);
+			} else {
+			  displayOutput("| ", eng->outbuf+skip);
+				fprintf(stderr,"PLML WARNING: output truncated\n");
+			}
+	 }
+
 
 	 // call engine to eval lasterr, then scrape from output buffer
 	 rc=engEvalString(eng->ep,"lasterr");
@@ -763,7 +778,7 @@ foreign_t mlExec(term_t engine, term_t cmd)
 	 skip=eng->skip_blanks(0);
 
 	 if (strncmp(eng->outbuf+skip,"ans =",5)!=0) {
-		 throw PlException(PlCompound("bad_output_buffer",PlTermv("lasterr",eng->outbuf)));
+		 throw PlException(PlCompound("bad_output_buffer",PlTermv("lasterr",eng->outbuf+skip)));
 	 } else skip+=5;
 	 skip+=2;
 
@@ -806,7 +821,7 @@ foreign_t mlMx2String(term_t mx, term_t a)
   try {
     char *str = mxArrayToString(term_to_mx(mx));
     if (!str) {
-      return PL_warning("array is not a character array");
+      return raise_exception("array is not a character array","mlMX2STRING");
     }
     int rc = PL_unify_chars(a, PL_STRING | REP_UTF8, -1, str);
     mxFree(str);
@@ -822,7 +837,7 @@ foreign_t mlMx2Atom(term_t mx, term_t a)
   try {
     char *str = mxArrayToString(term_to_mx(mx));
     if (!str) {
-      return PL_warning("array is not a character array");
+      return raise_exception("array is not a character array","mlMX2ATOM");
     }
     int rc = PL_unify_chars(a, PL_ATOM | REP_UTF8, -1, str);
     mxFree(str);
@@ -838,10 +853,10 @@ foreign_t mlMx2Float(term_t mxterm, term_t a)
   try {
     mxArray *mx = term_to_mx(mxterm);
     if (!mxIsDouble(mx)) {
-      return PL_warning("not numeric");
+      return raise_exception("not numeric","mlMX2FLOAT");
     }
     if (mxGetNumberOfElements(mx)!=1) {
-      return PL_warning("Not a scalar");
+      return raise_exception("not a scalar","mlMX2FLOAT");
     }
     double x = mxGetScalar(mx);
     
@@ -858,7 +873,7 @@ foreign_t mlMxGetReals(term_t mxterm, term_t a)
     mxArray *mx = term_to_mx(mxterm);
 		int       n = mxGetNumberOfElements(mx);
 
-    if (!mxIsDouble(mx)) return PL_warning("not numeric");
+    if (!mxIsDouble(mx)) return raise_exception("not numeric","mlMXGETREALS");
 		return unify_list_doubles(a,mxGetPr(mx),n);
   } catch (PlException &e) { 
     return e.plThrow(); 
@@ -872,7 +887,7 @@ foreign_t mlMx2Logical(term_t mxterm, term_t a)
 {
   try {
     mxArray *mx = term_to_mx(mxterm);
-		if (mxGetNumberOfElements(mx) != 1) return PL_warning("Not a scalar");
+		if (mxGetNumberOfElements(mx) != 1) return raise_exception("not a scalar", "mlMX2LOGICAL");
 
     int f;
     if (mxIsLogical(mx)) {
@@ -880,7 +895,7 @@ foreign_t mlMx2Logical(term_t mxterm, term_t a)
     } else if (mxIsDouble(mx)) {
       f = (mxGetScalar(mx) > 0) ? 1 : 0;
     } else {
-      return PL_warning("neither numeric nor logical (captain)");
+      return raise_exception("not logical (captain)","mlMX2LOGICAL");
     }
     
     return PL_unify_integer(a,f);
@@ -918,7 +933,7 @@ foreign_t mlMxSub2Ind(term_t mxterm, term_t substerm, term_t indterm)
 
 		// get substerm as int array
 		if (!get_list_integers(substerm,&nsubs,(int *)subs)) // !!
-			return PL_warning("Bad subscript list");
+			return raise_exception("Bad subscript list","mlMXSUB2IND");
 
 		// switch to zero-based subscripts
 		for (int i=0; i<nsubs; i++) subs[i]--;

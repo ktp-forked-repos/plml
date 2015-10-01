@@ -185,6 +185,51 @@ I'm afraid the best documentation is the code itself, but I do intend to
 produce a manual once some of the more embarrassing aspects of the system
 are resolved!
 
+### Caveats
+
+There are some limitations to what you can do with this Matlab interface.
+
+#### Restrictions on Matlab code
+The communication protocol between the Matlab Engine library and the
+Matlab process is somewhat flawed. if the Matlab computation outputs the
+characters `flushed_stdout` at any point, the conversation between the
+engine library and Matlab is irretrievable broken: the library gets out
+of step with the stream coming from Matlab and there is no way to get back
+into step. You have to close and reopen the Matlab instance and reopen.
+
+#### Ctrl-C handling (UNIX only)
+In Matlab, you can use Ctrl-C to interrupt a stuck or long running computation.
+Matlab respons to the INT signal generated when you press Ctrl-C at the 
+terminal. What happens when you press Ctrl-C during a computation when using this plml
+library depends on which thread the call was made. If it is the foreground
+thread, the INT signal interrupts BOTH the Matlab computation (because the Matlab 
+process is in the same Unix process group) AND the current
+Prolog thread, which will be in the depths of a call to the Matlab Engine API.
+This causes the call to return an error, but the Engine API loses synchonisation
+with the input stream from Matlab and the conversation is irretrievably broken.
+I'm afraid there's nothing we can do about this without interposing a filter
+a filter between the Matlab process and the engine library.
+
+If the Matlab call is made in a background thread, Ctrl-C interrupts the foreground
+Prolog thread, but not the engine API call. The INT signal is still sent to 
+the Matlab process, so it is interrupted and the engine API call returns early.
+
+The same effect can be obtained by sending an INT signal directly to the Matlab
+process. You can use the Matlab function `feature` to get Matlab's process ID.
+
+However, there is still a problem with detecting that Matlab has been interrupted.
+In some cases, there is no observable difference between completion and 
+interruption (try pressing Ctrl-C while running `pause(10)` in Matlab directly).
+In others, Matlab will print a message to stderr, and then stop with no other
+observable effect, in particular `lasterr` will not return anything useful.
+The engine API does not observe Matlab's stderr, and so there is no way to
+detect that a Matlab call has been interrupted. To get round this, plml adds
+the command `disp("}")` to the end of each Matlab execution. It then checks
+to see if "}\n" appears at the end of the output. If not, we conclude that the
+computation was interrupted. This is fine unless the call produces so much output
+that it doesn't fit into the output buffer. In this case, the check is
+skipped, and so checking for interruptions will not work.
+An 'output truncated' message is also printed on stderr.
 
 
 ## BUILDING/INSTALLATION
