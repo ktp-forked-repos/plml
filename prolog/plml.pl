@@ -342,21 +342,11 @@ ml_open(Id,Host,Options) :-
 	ground(Id),
    pack_dir(PackDir), % needed to locate package files
 	option(cmd(Bin),Options,matlab),
-   (	(Host=localhost;hostname(Host)) -> Exec1=Bin
-   ;	format(string(Exec1),'ssh ~w ~w',[Host,Bin])
-   ),
-	(	member(debug(In,Out),Options)
-	-> debug(plml,'Running Matlab with protocol logging.',[]),
-		debug(plml,'| Prolog > Matlab logged to "~w"',[In]),
-		debug(plml,'| Prolog < Matlab logged to "~w"',[Out]),
-		absolute_file_name(PackDir/scripts/logio,Spy,[access(execute)]),
-		format(atom(Exec),'~w ~w ~w ~w',[Spy,In,Out,Exec1])
-	;  Exec=Exec1
-	),
-	options_flags(Options,Flags),
-	format(atom(Cmd),'exec ~w ~w',[Exec,Flags]), % using exec fixes Ctrl-C bug 
-	debug(plml,'About to start Matlab with: ~w',[Cmd]),
-	mlOPEN(Cmd,Id),
+	option(awt(AWT),Options,false),
+	option(stderr(StdErr),Options,share),
+   foldl(build,[flags,awt(AWT),host(Host),stderr(StdErr),debug(PackDir,Options),exec],Bin,Exec), !,
+	debug(plml,'About to start Matlab with: ~w',[Exec]),
+	mlOPEN(Exec,Id),
    getenv('LANG',Lang),
 	debug(plml,'Setting LANG to ~w and character set to UTF-8.',[Lang]),
    ml_exec(Id,hide(feature(`'DefaultCharacterSet',`'UTF-8'))),
@@ -371,9 +361,38 @@ ml_open(Id,Host,Options) :-
 	assert(current_engine(Id)),
 	(	member(noinit,Options) -> true
 	;	forall( matlab_path(_,Dir), maplist(nofail(addpath),Dir)),
-		forall( matlab_init(_,Cmd), nofail(Cmd))
+		forall( matlab_init(_,Exec), nofail(Exec))
 	).
 					                                                                   
+%% build(+Spec,+Cmd1:string,-Cmd2:string) is det.
+%  This predicate is responsible for building the command to run Matlab.
+build(flags(Flags)) --> wappend([Flags]).
+build(host(localhost)) --> !.
+build(host(Host)) --> {hostname(Host)}, !.
+build(host(Host)) --> prepend([ssh,Host|T],T).
+build(stderr(share)) --> [].
+build(stderr(discard)) --> build(stderr(redirect('/dev/null'))).
+build(stderr(redirect(Dest)),Cmd1,Cmd2) :-
+   format(string(Cmd2),'sh -c "exec ~w 2>~w"',[Cmd1,Dest]).
+build(debug(PackDir,Options)) -->
+   {  member(debug(In,Out),Options), !,
+      debug(plml,'Running Matlab with protocol logging.',[]),
+      debug(plml,'| Prolog > Matlab logged to "~w"',[In]),
+      debug(plml,'| Prolog < Matlab logged to "~w"',[Out]),
+      absolute_file_name(PackDir/scripts/logio,Spy,[access(execute)])
+   },
+   prepend([Spy,In,Out|T],T).
+build(debug(_,_)) --> [].
+build(exec) --> prepend([exec|T],T).
+build(flags) --> wappend(['-nodesktop','-nosplash']).
+build(awt(false)) --> wappend(['-noawt']).
+build(awt(true)) --> [].
+
+prepend(Words,[S1],S1,S2) :- concat(Words,S2).
+wappend(Words,S1,S2) :- concat([S1|Words],S2).
+concat(Words,String) :- atomics_to_string(Words,' ',String).
+
+
 pack_dir(PackDir) :-
    module_property(plml,file(ThisFile)),
    file_directory_name(ThisFile,PrologDir), 
@@ -388,13 +407,6 @@ ml_close(Id) :- ground(Id), mlCLOSE(Id), retract(current_engine(Id)).
 
 nofail(P) :- catch(ignore(call(P)), E, print_message(warning,E)).
 nofail(P,X) :- catch(ignore(call(P,X)), E, print_message(warning,E)).
-
-options_flags(Opts,Flags) :-
-	option(awt(AWT),Opts,false),
-	(	AWT=true 
-	-> Flags='-nodesktop -nosplash'
-	;	Flags='-nodesktop -nosplash -noawt'
-	).
 
 
 %% ml_exec(+Id:ml_eng, +Expr:ml_expr) is det.
