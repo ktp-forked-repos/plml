@@ -344,7 +344,7 @@ ml_open(Id,Host,Options) :-
 	option(cmd(Bin),Options,matlab),
 	option(awt(AWT),Options,false),
 	option(stderr(StdErr),Options,share),
-   foldl(build,[flags,awt(AWT),host(Host),stderr(StdErr),debug(PackDir,Options),exec],Bin,Exec), !,
+   seqmap(build,[flags,awt(AWT),host(Host),stderr(StdErr),debug(PackDir,Options),exec],Bin,Exec), !,
 	debug(plml,'About to start Matlab with: ~w',[Exec]),
 	mlOPEN(Exec,Id),
    getenv('LANG',Lang),
