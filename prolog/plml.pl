@@ -276,10 +276,11 @@ read_line_from_pipe(Cmd,Atom) :-
 % NB: Loading Matlab library can change LANG in environment,
 % so we have to remember what it was and restore it after loading.
 % See also mlOpen: we are going to talk to Matlab via UTF-8 strings.
-:- getenv('LANG',Lang), nb_setval(plml_env_lang,Lang).
+:- (getenv('LANG',Lang) -> LL=just(Lang); LL=nothing), nb_setval(plml_env_lang,LL).
 :-	use_foreign_library(foreign(plml)).
-:- nb_getval(plml_env_lang,Lang), setenv('LANG',Lang), 
-   nb_delete(plml_env_lang).
+:- nb_getval(plml_env_lang,LL), 
+   nb_delete(plml_env_lang),
+   (LL=just(Lang) -> setenv('LANG',Lang); unsetenv('LANG')). 
 
 :- initialization(at_halt(ml_closeall)).
 
@@ -347,7 +348,9 @@ ml_open(Id,Host,Options) :-
    seqmap(build,[flags,awt(AWT),host(Host),stderr(StdErr),debug(PackDir,Options),exec],Bin,Exec), !,
 	debug(plml,'About to start Matlab with: ~w',[Exec]),
 	mlOPEN(Exec,Id),
-   getenv('LANG',Lang),
+   (  getenv('LANG',Lang) -> true
+   ;  Lang='UTF-8', print_message(warning,no_lang(Lang))
+   ),
 	debug(plml,'Setting LANG to ~w and character set to UTF-8.',[Lang]),
    ml_exec(Id,hide(feature(`'DefaultCharacterSet',`'UTF-8'))),
    ml_exec(Id,hide(setenv(`'LANG',`Lang))),
@@ -1027,9 +1030,10 @@ multiplot(Layout,Plots,Axes) :-
 %user:portray(A|B) :- print(A), write('|'), print(B).
 %user:portray(Z) :- mlWSNAME(Z,N,ID), format('<~w:~w>',[ID,N]).
 
-prolog:message(ml_illegal_expression(Expr),[ 'Illegal Matlab expression: ~w'-[Expr] | Z], Z).
-prolog:message(mlerror(Eng,Msg,Cmd),[
-'Error in Matlab engine (~w):\n   * ~w\n   * while executing "~w"'-[Eng,Msg,Cmd] | Z], Z).
+prolog:message(no_lang(Lang)) --> ['Environment variable LANG not set -- using ~w'-[Lang]].
+prolog:message(ml_illegal_expression(Expr)) --> ['Illegal Matlab expression: ~w'-[Expr]].
+prolog:message(mlerror(Eng,Msg,Cmd)) --> 
+   ['Error in Matlab engine (~w):\n   * ~w\n   * while executing "~w"'-[Eng,Msg,Cmd]].
 
 
 %% pl2tex(+Exp:tex_expr)// is det.
