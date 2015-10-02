@@ -93,6 +93,7 @@
  */
 
 #include <SWI-cpp.h>
+#include <SWI-Stream.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -111,7 +112,7 @@
 #define MAXENGINES 8
 #define BUFSIZE  65535 // buffer for matlab output
 #define MAXCMDLEN 256
-#define EVALFMT "lasterr('');disp('{');%s;disp('}')"
+#define EVALFMT "lasterr('');disp('{');%s,disp('}')"
 #define MAX_RELEASE_QUEUE 2000
 
 /* using namespace std; */
@@ -295,7 +296,7 @@ public:
 		  if (engEvalString(ep,buf)!=0) bad++; 
 		}
 
-		if (bad>0) fprintf(stderr,"plml: Failed to release %d batches of workspace variables.\n",bad);
+		if (bad>0) Sfprintf(Serror,"plml: Failed to release %d batches of workspace variables.\n",bad);
 	 }
   }
 
@@ -307,7 +308,7 @@ public:
       outbuf=new char[BUFSIZE+1];
       outbuf[BUFSIZE]=0;
       engOutputBuffer(ep,outbuf,BUFSIZE);
-      //fprintf(stderr,"plml: Matlab engine (%s) open.\n",PL_atom_chars(id));
+      Sfprintf(Serror,"%% plml: Matlab engine (%s) open.\n",PL_atom_chars(id));
     } else {
       throw PlException("open engine failed");
     }
@@ -433,7 +434,7 @@ install_t install() {
   pthread_mutex_init(&EngMutex,NULL);
 }
 
-void check(int rc) { if (!rc) printf("plml: *** Something failed.\n");}
+void check(int rc) { if (!rc) Sfprintf(Serror,"plml: *** Something failed.\n");}
 
 void check_array_index(mxArray *mx, long i) 
 {
@@ -555,10 +556,10 @@ static eng *findEngine(term_t id_term)
 static void displayOutput(const char *prefix,const char *p) 
 {
 	while (*p) {
-		fputs(prefix,stderr); 
-		while (*p && *p!='\n') fputc(*p++,stderr); 
-		if (*p) p++; else fputs(prefix,stderr);
-		fputc('\n',stderr); 
+		Sfputs(prefix,Soutput); 
+		while (*p && *p!='\n') Sputc(*p++,Soutput); 
+		if (*p) p++; else Sfputs(prefix,Soutput);
+		Sputc('\n',Soutput); 
 	}
 }
 
@@ -582,7 +583,7 @@ foreign_t mlOpen(term_t servercmd, term_t id_term)
 {
   try { 
     findEngine(id_term);
-    fprintf(stderr,"plml: mlOPEN/2: Engine %s already open\n",(const char *)PlTerm(id_term));
+    Sfprintf(Serror,"plml: mlOPEN/2: Engine %s already open\n",(const char *)PlTerm(id_term));
                 PL_succeed;
   } catch (...) {}
   
@@ -593,7 +594,7 @@ foreign_t mlOpen(term_t servercmd, term_t id_term)
         atom_t id;
         check(PL_get_atom(id_term,&id));
         engines[i].open(PlTerm(servercmd), id);
-		  displayOutput("| ",engines[i].outbuf);
+		    displayOutput("| ",engines[i].outbuf);
         PL_succeed;
       }
     }
@@ -736,9 +737,7 @@ foreign_t mlExec(term_t engine, term_t cmd)
 		 char *eval_cmd = new char[cmdlen+strlen(EVALFMT)-1];
 	 	 if (eval_cmd==NULL) throw PlException("Failed to allocate memory for command");
 	 	 sprintf(eval_cmd, EVALFMT, cmdstr);
-	 	 //printf("-- Calling Matlab engine...                 \r"); fflush(stdout);
 		 rc=engEvalString(eng->ep,eval_cmd); 
-	 	 //printf("-- Returned from Matlab engine...            \r"); fflush(stdout);
 	 	 delete [] eval_cmd;
 	}
 
@@ -765,7 +764,7 @@ foreign_t mlExec(term_t engine, term_t cmd)
 			  displayOutput("| ", eng->outbuf+skip);
 			} else {
 			  displayOutput("| ", eng->outbuf+skip);
-				fprintf(stderr,"PLML WARNING: output truncated\n");
+				Sfprintf(Serror,"PLML WARNING: output truncated\n");
 			}
 	 }
 
