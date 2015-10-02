@@ -137,3 +137,15 @@
 	defining NOLOCK removes the mutex that protects the Matlab engine.
 	If you are sure that library will only be called in one thread,
 	then you can rebuild with this enabled.
+
+2015-10 v1.5.0
+	Redesign of excecution protocol. Matlab commands are now bracketed
+	with "{\n" and "}\n". A missing "}\n" now signals that the computation
+	was interrupted (unless the output buffer is full), in which case,
+	an exception is thrown. Also, if Matlab receives SIGINT between
+	calls to the engine, the extra ">> \n" lines generated are now
+	recognised and skipped when processing the next execution.
+
+2015-10 v1.5.1
+	Switching to Prolog output streams for messages (user_error) and
+	Matlab output (user_output).
