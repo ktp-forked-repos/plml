@@ -92,8 +92,8 @@
  *      (Later changes may be found in the CHANGES file)
  */
 
-#include <SWI-cpp.h>
 #include <SWI-Stream.h>
+#include <SWI-cpp.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -296,7 +296,7 @@ public:
 		  if (engEvalString(ep,buf)!=0) bad++; 
 		}
 
-		if (bad>0) Sfprintf(Serror,"plml: Failed to release %d batches of workspace variables.\n",bad);
+		if (bad>0) Sfprintf(Serror,"%% PLML: Failed to release %d batches of workspace variables.\n",bad);
 	 }
   }
 
@@ -308,7 +308,6 @@ public:
       outbuf=new char[BUFSIZE+1];
       outbuf[BUFSIZE]=0;
       engOutputBuffer(ep,outbuf,BUFSIZE);
-      Sfprintf(Serror,"%% plml: Matlab engine (%s) open.\n",PL_atom_chars(id));
     } else {
       throw PlException("open engine failed");
     }
@@ -434,7 +433,7 @@ install_t install() {
   pthread_mutex_init(&EngMutex,NULL);
 }
 
-void check(int rc) { if (!rc) Sfprintf(Serror,"plml: *** Something failed.\n");}
+void check(int rc) { if (!rc) Sfprintf(Serror,"%% PLML: *** Something failed.\n");}
 
 void check_array_index(mxArray *mx, long i) 
 {
@@ -555,12 +554,13 @@ static eng *findEngine(term_t id_term)
 
 static void displayOutput(const char *prefix,const char *p) 
 {
-	while (*p) {
-		Sfputs(prefix,Soutput); 
-		while (*p && *p!='\n') Sputc(*p++,Soutput); 
-		if (*p) p++; else Sfputs(prefix,Soutput);
-		Sputc('\n',Soutput); 
-	}
+	Sfputs(p,Scurrent_output);
+	/* while (*p) { */
+	/* 	Sfputs(prefix,Scurrent_output); */ 
+	/* 	while (*p && *p!='\n') Sputcode(*p++,Scurrent_output); */ 
+	/* 	if (*p) p++; else Sfputs(prefix,Scurrent_output); */
+	/* 	Sputcode('\n',Scurrent_output); */ 
+	/* } */
 }
 
 /* utility function to extract UTF-8 encoded character array from 
@@ -583,7 +583,7 @@ foreign_t mlOpen(term_t servercmd, term_t id_term)
 {
   try { 
     findEngine(id_term);
-    Sfprintf(Serror,"plml: mlOPEN/2: Engine %s already open\n",(const char *)PlTerm(id_term));
+    Sfprintf(Serror,"%% PLML: mlOPEN/2: Engine %s already open\n",(const char *)PlTerm(id_term));
                 PL_succeed;
   } catch (...) {}
   
@@ -764,7 +764,7 @@ foreign_t mlExec(term_t engine, term_t cmd)
 			  displayOutput("| ", eng->outbuf+skip);
 			} else {
 			  displayOutput("| ", eng->outbuf+skip);
-				Sfprintf(Serror,"PLML WARNING: output truncated\n");
+				Sfprintf(Serror,"%% PLML: output truncated\n");
 			}
 	 }
 
