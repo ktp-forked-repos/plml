@@ -582,7 +582,7 @@ static eng *findEngine(term_t id_term)
   for (int i=0; i<MAXENGINES; i++) {
     if (engines[i].matches(id)) return &engines[i];
   }
-  throw PlException(PlCompound("plml_unknown_engine", PlTermv(PlTerm(id_term))),PlTerm());
+  throw PlException(PlCompound("plml_unknown_engine", PlTermv(PlTerm(id_term))));
 }
 
 static void displayOutput(const char *prefix,const char *p) { Sfputs(p,Scurrent_output); }
