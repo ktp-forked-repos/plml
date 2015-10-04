@@ -341,7 +341,7 @@ ml_open(Id,Host,Options) :-
    option(path(Path),Options,[]),  must_be(list,Path),
    once(seqmap(build,[flags,awt(AWT),host(Host),stderr(StdErr),debug(PackDir,Options),exec],Bin,Exec)),
 
-	debug(plml,'About to start Matlab with: ~w',[Exec]),
+	debug(plml,'About to start Matlab with: ~q',[Exec]),
 	setup_call_catcher_cleanup( 
       mlOPEN(Exec,Id),
       ml_init(Id,PackDir,Path),
@@ -422,7 +422,7 @@ nofail(P,X) :- catch(ignore(call(P,X)), E, print_message(warning,E)).
 %
 %  Execute Matlab expression without returning any values.
 ml_exec(Id,X)  :- 
-	debug(plml,'plml:ml_exec term ~W',[X,[max_depth(10)]]),
+	debug(plml,'plml:ml_exec term ~W',[X,[quoted(true),max_depth(10)]]),
 	term_mlstring(Id,X,C), !, 
 	debug(plml(commands),'plml:ml_exec>> ~s',[C]),
 	mlEXEC(Id,C).
