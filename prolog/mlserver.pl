@@ -1,4 +1,4 @@
-/* Part of DML (Digital Music Laboratory)
+/* Part of plml
 	Copyright 2014-2015 Samer Abdallah, University of London
 	 
 	This program is free software; you can redistribute it and/or
@@ -21,10 +21,11 @@
       ,  start_matlab/1
       ,  stop_matlab/0
       ,  ml_interrupt/0
+      ,  ml_async/2
+      ,  ml_async/3
       ,  (??)/1
       ,  (???)/1
       ,  (===)/2
-      ,  with_output/1
 		]).
 
 % !!! when should we garbage_collect_atoms?
@@ -44,39 +45,44 @@
 start_matlab :- start_matlab([]).
 start_matlab(Opts) :-
    (  current_thread(matlab,running) 
-   -> debug(mlserver,'Matlab server thread already running',[])
+   -> debug(mlserver(control),'Matlab server thread already running',[])
    ;  (current_thread(matlab,_) -> thread_join(matlab,_); true),
       thread_create(ml_server(Opts),_,[alias(matlab)])
    ).
 
 stop_matlab :-
    (  current_matlab_thread(TID,_) -> kill_thread(TID)
-   ;  debug(mlserver,'No Matlab thread running.',[])
+   ;  debug(mlserver(control),'No Matlab thread running.',[])
    ).
 
 
-?? Cmd :- setting(exec_timeout,T), ml_request(exec(Cmd),_,T).
+%% +Returns:ml_vals(A) === +Expr:ml_expr(A) is det.
+%  Asynchronous Matlab evaluation. Anything printed by Matlab code is output
+%  to the current_output stream of the Matlab server thread.
+[X1|Xs]===Expr :- !, setting(eval_timeout,T), ml_async(eval(Expr,[X1|Xs]),T).
+X===Expr :- !, setting(eval_timeout,T), ml_async(eval(Expr,[X]),T).
+
+%% ??(+Cmd:ml_stmt) is det.
+%  Asynchronous Matlab execution. Anything printed by Matlab code is captured
+%  and printed to the current output of this thread (in blue).
+?? Cmd :- 
+   setting(exec_timeout,T), 
+   ml_async(exec(Cmd),T,O), 
+   ansi_format([fg(blue)],'~s',[O]).
+
+%% ???(+Expr:ml_expr(bool)) is det.
+%  Asynchronous Matlab test. Equivalent to bool(1)===Expr.
 ??? Expr :- bool(1)===Expr.
 
-with_output(??Cmd) :- 
-   setting(exec_timeout,T), 
-   ml_request(exec(Cmd,Output),Output,T),
-   write(Output).
-
-X===Expr :-
-   setting(eval_timeout,T),
-   (is_list(X) -> Rets=X; Rets=[X]),
-   once(maplist(leftval,Rets,Types,Vals)),
-   ml_request(eval(Expr,Types,Vals),Vals,T).
    
 kill_thread(Thread) :-
    (  current_thread(Thread,running)
    -> thread_send_message(Thread,quit),
-      debug(mlserver,'waiting for thread ~w to die.\n',[Thread]),
+      debug(mlserver(control),'waiting for thread ~w to die.\n',[Thread]),
       catch( call_with_time_limit(5,
          (thread_join(Thread,RC), writeln(exit_code(RC)))),
          time_limit_exceeded,
-         debug(mlserver,'timeout waiting for thread ~w.\n',[Thread]))
+         debug(mlserver(control),'timeout waiting for thread ~w.\n',[Thread]))
    ;  true
    ).
 
@@ -95,18 +101,39 @@ ml_run :-
 
 ml_server_loop :-
 	thread_get_message(Msg),
-	(	Msg=quit -> debug(mlserver,'Matlab server thread terminating.', [])
+	(	Msg=quit -> debug(mlserver(server),'Matlab server thread terminating.', [])
 	;	Msg=req(Client,ID,Req,Reply)
-   -> debug(mlserver,'Server: handling ~w: ~W',[ID,Req,[max_depth(8)]]),
+   -> debug(mlserver(server),'handling ~w: ~W',[ID,Req,[quoted(true),max_depth(8)]]),
       memo:reify(mlserver:handle_request(Req),Status), !,
-      debug(mlserver,'Server: result is ~w',[Status]),
+      debug(mlserver(server),'result is ~q',[Status]),
       thread_send_message(Client,resp(ID,Status,Reply)),
 		ml_server_loop
 	).
 
-handle_request(exec(Cmd)) :- ml_exec(ml,Cmd).
-handle_request(exec(Cmd,Output)) :- with_output_to(string(Output),ml_exec(ml,Cmd)).
-handle_request(eval(Expr,Types,Vals)) :- ml_eval(ml,Expr,Types,Vals).
+handle_request(exec(Cmd))     :- ml_exec(ml,Cmd).
+handle_request(eval(E,Ts,Vs)) :- ml_eval(ml,E,Ts,Vs).
+handle_request(output(R,O))   :- with_output_to(string(O),handle_request(R)).
+
+%% ml_async(+Req, +Timeout:float, -Output:string) is det.
+%% ml_async(+Req, +Timeout:float) is det.
+%
+%  Use Matlab server thread to do computation described by Req. Req can be
+%     *  exec(Cmd:ml_stmt)
+%     *  eval(Expr:ml_expr(A),Returns:ml_vals(A))
+%
+%  If the computation takes longer than Timeout seconds, Matlab is interrupted
+%  and abort(timeout) is thrown. The computation can also be interrupted
+%  by signalling the client thread with =|throw(abort(Reason))|=, where Reason 
+%  can be anything. If third argument Output is supplied, anything printed by
+%  Matlab computation is captured and returned as a string.
+ml_async(R,T) :- req(R,Req,Reply), ml_request(Req,Reply,T).  
+ml_async(R,T,O) :- req(R,Req,Reply), ml_request(output(Req,O),Reply-O,T).  
+
+
+req(exec(Cmd),exec(Cmd),_) :- !.
+req(eval(Expr,Rets),eval(Expr,Types,Vals),Vals) :-
+   maplist(leftval,Rets,Types,Vals), !.
+req(R,_,_) :- throw(invalid_mlserver_request(R)).
 
 
 %% ml_request(+Req, ?Reply, +Timeout) is det.
@@ -115,24 +142,20 @@ handle_request(eval(Expr,Types,Vals)) :- ml_eval(ml,Expr,Types,Vals).
 %  is sent back to this thread.
 %  Request can be:
 %     *  exec(Cmd)
-%     *  exec(Cmd,Output)
 %     *  eval(Expr,Types,Vals)
 %
 %  Reply can be any term, possibly sharing variables with Req. This is used
 %  to pick out which valuesfrom an eval(_,_,_) request are returned.
-%
-%  If the computation takes longer than Timeout seconds, Matlab is interrupted
-%  and abort(timeout) is thrown. The computation can also be interrupted
-%  by signalling the client thread (ie the one calling ml_request) with 
-%  =|throw(abort(Reason))|=, where Reason can be anything.
+%  NB the mutex ensures that if we have to interrupt due to timeout, then we
+%  only interrupt our own Matlab computation, not some other one.
+ml_request(Req,Reply,Timeout) :- 
+   gensym(ml,ID), 
+   with_mutex(mlclient,ml_request(ID,Req,Reply,Timeout)).
 
-% NB the mutex ensures that if we have to interrupt due to timeout, then we
-% only interrupt our own Matlab computation, not some other one.
-ml_request(Req,Reply,Timeout) :- gensym(ml,ID), with_mutex(mlclient,ml_request(ID,Req,Reply,Timeout)).
 ml_request(ID,Req,Reply,Timeout) :-
 	thread_self(Self),
    (current_matlab_thread(Matlab,_) -> true; throw(matlab_not_running)),
-   debug(mlserver,'Client sending request ~w: ~W.',[ID,Req,[max_depth(8)]]),
+   debug(mlserver(client),'Sending request ~w: ~W.',[ID,Req,[max_depth(8)]]),
    setup_call_catcher_cleanup(
       thread_send_message(Matlab,req(Self,ID,Req,Reply)),
       (  thread_get_message(Self,resp(ID,Status,Reply),[timeout(Timeout)])
@@ -141,19 +164,19 @@ ml_request(ID,Req,Reply,Timeout) :-
       exception(abort(Reason)),
       interrupt_cleanup(Reason,ID)
    ), !,
-   debug(mlserver,'Client got response ~w: ~w.',[ID,Status]),
+   debug(mlserver(client),'Got response ~w: ~w.',[ID,Status]),
    memo:reflect(Status).
 
 interrupt_cleanup(Reason,ID) :-
-   debug(mlserver,'Client (~w) interrupted due to: ~w.',[ID,Reason]),
+   debug(mlserver(client),'request (~w) interrupted due to: ~w.',[ID,Reason]),
    ml_interrupt,
    thread_get_message(resp(ID,Status,_)),
-   debug(mlserver,'Client (~w) got post-~w response: ~w.',[ID,Reason,Status]).
+   debug(mlserver(client),'request (~w) got post-~w response: ~w.',[ID,Reason,Status]).
 
 %% ml_interrupt is det.
 %  Sends a SIGINT (interrupt) signal to the Matlab process.
 ml_interrupt :-
-   debug(mlserver,'Interrupting MATLAB.',[]),
+   debug(mlserver(client),'Interrupting MATLAB.',[]),
    (current_matlab_thread(_,PID) -> true; throw(matlab_not_running)),
    process_kill(PID,int).
 
