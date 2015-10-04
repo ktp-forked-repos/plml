@@ -149,3 +149,11 @@
 2015-10 v1.5.1
 	Switching to Prolog output streams for messages (user_error) and
 	Matlab output (user_output).
+
+2015-10 v2.0.0
+	Incorporated mlserver library for running separate Matlab server thread.
+	Standardised exceptions and added prolog:message//1 clauses.
+	General tidying up.
+	Removed mlGETOUTPUT/2
+	Fixed recently introduce bugs in mlEXEC (interrupt/error diagnositics)
+	Fixed Matlab quoted string escape mechanism to handle \n properly

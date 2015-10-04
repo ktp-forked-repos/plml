@@ -709,8 +709,8 @@ static PlException matlab_exception(term_t engine, matlab_error &e)
 	 PL_put_atom_chars(desc,e.msg);
 	 PL_put_atom_chars(cmd,e.cmd);
 
-	 PL_cons_functor(ex,mlerror,engine,desc,cmd);
-	return PlException(ex);
+	 if (!PL_cons_functor(ex,mlerror,engine,desc,cmd)) return PlResourceError();
+	 else return PlException(ex);
 }
 
 static size_t list_length(term_t list)

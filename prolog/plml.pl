@@ -160,7 +160,6 @@
 	cell(X)         % construct 1xN cell array from elements of X
 	`X              % same as q(X)
 	q(X)            % wrap V[X] in single quotes (escaping internal quotes)
-	qq(X)           % wrap V[X] in double quotes (escaping internal double quotes)
 	tq(X)           % wrap TeX expression in single quotes (escape internal quotes)
 	==
 
@@ -234,7 +233,7 @@
 	  
 :- use_module(library(apply_macros)).
 :- use_module(library(dcg_core)).
-:- use_module(library(dcg_codes)).
+:- use_module(library(dcg_codes),except([q//1])).
 
 :- set_prolog_flag(back_quotes,symbol_char).
 :- set_prolog_flag(double_quotes,codes).
@@ -259,19 +258,6 @@ read_line_from_pipe(Cmd,Atom) :-
       open(pipe(Cmd),read,S),
       (read_line_to_codes(S,Codes), atom_codes(Atom,Codes)),
       close(S)).
-
-% prepare :- 
-%    read_line_from_pipe('matlab -e | grep ^DYLD_LIBRARY_PATH=',Atom),
-%    format('Read from pipe: ~q\n',[Atom]),
-%    atom_concat('DYLD_LIBRARY_PATH=',Path,Atom),
-%    format('Path is: ~q\n',[Path]),
-%    setenv('DYLD_FALLBACK_LIBRARY_PATH',Path),
-%    format('PATH SET OK\n',[]).
-% :- prepare.
-% :- getenv('DYLD_FALLBACK_LIBRARY_PATH',P),
-%    format('DYLD path is ~w\n',[P]).
-%
-
 
 % NB: Loading Matlab library can change LANG in environment,
 % so we have to remember what it was and restore it after loading.
@@ -336,36 +322,56 @@ user:goal_expansion( bt_call(Do,Undo), (Do, (true;	once(Undo), fail))).
 %    * awt(Flag:bool)
 %      If false (default), call Matlab with -noawt option. Otherwise, Java graphics
 %      will be available.
+%    * stderr(S:{share|redirect(path)})
+%      Determines what happens to Matlab's standard error output. If =|share|=,
+%      then it is merged with SWI Prolog's standard error. If =|redirect(Path)|=,
+%      it is sent to the named file. Default is =|share|=.
+%    * path(Dirs:list(filespec))
+%      Another mechanism for determining the Matlab path. Items are expanded
+%      using absolute_file_name/2. Default is [].
 
 ml_open(Id) :- ml_open(Id,localhost,[]). 
 ml_open(Id,Host) :- ml_open(Id,Host,[]).
 ml_open(Id,Host,Options) :- 
 	ground(Id),
-   pack_dir(PackDir), % needed to locate package files
+   pack_dir(PackDir),
 	option(cmd(Bin),Options,matlab),
-	option(awt(AWT),Options,false),
 	option(stderr(StdErr),Options,share),
-   seqmap(build,[flags,awt(AWT),host(Host),stderr(StdErr),debug(PackDir,Options),exec],Bin,Exec), !,
+	option(awt(AWT),Options,false), must_be(boolean,AWT),
+   option(path(Path),Options,[]),  must_be(list,Path),
+   once(seqmap(build,[flags,awt(AWT),host(Host),stderr(StdErr),debug(PackDir,Options),exec],Bin,Exec)),
+
 	debug(plml,'About to start Matlab with: ~w',[Exec]),
-	mlOPEN(Exec,Id),
+	setup_call_catcher_cleanup( 
+      mlOPEN(Exec,Id),
+      ml_init(Id,PackDir,Path),
+      exception(_),
+      mlCLOSE(Id)
+   ),
+   assert(current_engine(Id)),
+   expand_file_name('~/var/matbase',[DBROOT]),
+   debug(plml,'Setting MATBASE root to ~q.',[DBROOT]),
+   nofail(ml_exec(Id,dbroot(q(DBROOT)))),
+
+	(	member(noinit,Options) -> true
+	;	forall( matlab_path(_,Dir), maplist(nofail(addpath(Id)),Dir)),
+		forall( matlab_init(_,Exec), nofail(Exec))
+	).
+
+% this is the part of the initialisation that is not allowed to fail
+ml_init(Id,PackDir,Path) :-
+   directory_file_path(PackDir,matlab,MatlabDir),
    (  getenv('LANG',Lang) -> true
    ;  Lang='UTF-8', print_message(warning,no_lang(Lang))
    ),
-	debug(plml,'Setting LANG to ~w and character set to UTF-8.',[Lang]),
+   debug(plml,'Setting LANG to ~w and character set to UTF-8.',[Lang]),
    ml_exec(Id,hide(feature(`'DefaultCharacterSet',`'UTF-8'))),
    ml_exec(Id,hide(setenv(`'LANG',`Lang))),
-   directory_file_path(PackDir,matlab,MatlabDir),
    debug(plml,'Adding ~q to Matlab path.',[MatlabDir]),
-   ml_exec(Id,addpath(q(MatlabDir))),
-   expand_file_name('~/var/matbase',[DBROOT]),
-   debug(plml,'Setting MATBASE root to ~q.',[DBROOT]),
-   ml_exec(Id,dbroot(q(DBROOT))),
-
-	assert(current_engine(Id)),
-	(	member(noinit,Options) -> true
-	;	forall( matlab_path(_,Dir), maplist(nofail(addpath),Dir)),
-		forall( matlab_init(_,Exec), nofail(Exec))
-	).
+   ml_exec(Id,addpath(`MatlabDir)),
+   forall( member(Spec,Path),
+           (  absolute_file_name(Spec,Dir,[file_type(directory)]),
+              ml_exec(Id,addpath(q(Dir))))).
 					                                                                   
 %% build(+Spec,+Cmd1:string,-Cmd2:string) is det.
 %  This predicate is responsible for building the command to run Matlab.
@@ -401,8 +407,8 @@ pack_dir(PackDir) :-
    file_directory_name(ThisFile,PrologDir), 
    file_directory_name(PrologDir,PackDir). 
 
-addpath(local(D)) :- !, ml_exec(ml,padl(q(D))).
-addpath(D) :- !, ml_exec(ml,padd(q(D))).
+addpath(Id,local(D)) :- !, ml_exec(Id,padl(q(D))).
+addpath(Id,D) :- !, ml_exec(Id,padd(q(D))).
 
 %% ml_close(+Id:ml_eng) is det.
 %  Close Matlab session associated with Id.
@@ -445,9 +451,10 @@ ml_ws_name(X,Y,Z) :- mlWSNAME(X,Y,Z).
 %  to Y. If Y is unbound or a single ml_val(_), only the first return value is bound.
 %  If Y is a list, multiple return values are processed.
 Y === X :- 
+   current_engine(Id),
 	(	is_list(Y) 
-	-> maplist(leftval,Y,TX,VX), ml_eval(ml,X,TX,VX)
-	;	leftval(Y,T,V), ml_eval(ml,X,[T],[V])
+	-> maplist(leftval,Y,TX,VX), ml_eval(Id,X,TX,VX)
+	;	leftval(Y,T,V), ml_eval(Id,X,[T],[V])
 	).
 
 %% leftval( +TVal:tagged(T), -T:type, -Val:T) is det.
@@ -474,11 +481,13 @@ leftval( Val:Type,  Type,  Val).
 
 %% ??(X:ml_expr(_)) is det.
 %  Execute Matlab expression X as with ml_exec/2, without returning any values.
-?? X    :- ml_exec(ml,X).
+%  Uses current (last opened) engine
+?? X    :- current_engine(Id), ml_exec(Id,X).
 
 %% ???(X:ml_expr(bool)) is semidet.
 %  Evaluate Matlab boolean expression X as with ml_test/2.
-??? Q   :- ml_test(ml,Q).
+%  Uses current (last opened) engine
+??? Q   :- current_engine(Id), ml_test(Id,Q).
 
 
 /*
@@ -509,7 +518,6 @@ stmt(I,Expr)       --> !, ml_expr(I,Expr).
 ml_expr(_,\X)         --> !, phrase(X).
 ml_expr(I,$X)         --> !, {pl2ml_hook(X,Y)}, ml_expr(I,Y).
 ml_expr(I,q(X))       --> !, ({string(X)} -> q(str(X)); q(stmt(I,X))).
-ml_expr(I,qq(X))      --> !, qq(stmt(I,X)).
 ml_expr(_,tq(X))      --> !, q(pl2tex(X)).
 ml_expr(_,atom(X))    --> !, atm(X).
 ml_expr(_,term(X))    --> !, wr(X). % this could be dangerous
@@ -592,6 +600,13 @@ ml_expr(I,F) --> {F=..[H|AX]}, atm(H), arglist(I,AX).
 
 ml_expr_with(I,Lambda,Y) --> {copy_term(Lambda,Y\\PY)}, ml_expr(I,PY).
 	
+
+% take output of DCG phrase P and generate properly escaped Matlab single quoted string.
+q(P) --> {phrase(P,Codes)}, "'", esc(ml_quote,Codes), "'".
+
+ml_quote([0''|T],T) --> !, "''".
+ml_quote([0'\n|T],T) --> !, "\\n".
+ml_quote([C|T],T) --> [C].
 
 % dimensions implicit in nested list representation
 array_dims([X|_],M) :- !, array_dims(X,N), succ(N,M).
@@ -927,13 +942,12 @@ persist_item(A,A)   :- atomic(A).
  */
 
 
-
 % for dealing with option lists
 
 %% mhelp(+Name:atom) is det.
 %  Lookup Matlab help on the given name. Equivalent to executing help(`X).
-mhelp(X) :- ml_exec(ml,help(q(X))).
-
+%  If using a colour terminal, output is written in blue.
+mhelp(X) :- current_engine(Id), ansi_format([fg(blue)],'~@',[plml:ml_exec(Id,help(q(X)))]).
 
 
 %% compileoptions(+Opts:list(ml_options), -Prefs:ml_expr(options)) is det.
@@ -1031,9 +1045,18 @@ multiplot(Layout,Plots,Axes) :-
 %user:portray(Z) :- mlWSNAME(Z,N,ID), format('<~w:~w>',[ID,N]).
 
 prolog:message(no_lang(Lang)) --> ['Environment variable LANG not set -- using ~w'-[Lang]].
+prolog:message(plml_unknown_engine(Id)) --> ['Matlab engine (~w) does not exist'-[Id]].
 prolog:message(ml_illegal_expression(Expr)) --> ['Illegal Matlab expression: ~w'-[Expr]].
-prolog:message(mlerror(Eng,Msg,Cmd)) --> 
-   ['Error in Matlab engine (~w):\n   * ~w\n   * while executing "~w"'-[Eng,Msg,Cmd]].
+prolog:message(ml_syntax_error) --> ['Unknown Matlab syntax error'].
+prolog:message(ml_interrupted) --> ['Matlab computation was interrupted'].
+prolog:message(error(mleng_error(Function,Arg),_)) -->
+   ['Matlab engine API function ~w failed on "~s"',[Function,Arg]].
+prolog:message(error(plml_error(Got,Expected),_)) -->
+   ['plml protocol error: got ~q, expected ~q'-[Got,Expected]].
+prolog:message(error(ml_error(Msg,Cmd),_)) --> 
+   ['Matlab error:'-[], nl, '>> ~w'-[Msg], nl],
+   ['while executing "~s"'-[Cmd]].
+
 
 
 %% pl2tex(+Exp:tex_expr)// is det.

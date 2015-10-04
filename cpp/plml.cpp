@@ -19,11 +19,11 @@
  */
 
 /*
- * These are some foreign for procedures to enable SWI Prolog to run
+ * These are some foreign procedures to enable SWI Prolog to run
  * and communicate with a MATLAB computational engine, which is
  * started as a separate process on the local or a remote machine.
  *
- * Communication is handled by the MATLAB engine API (engFoo
+ * Communication is handled by the MATLAB engine API (eng*
  * functions) which in turn use a pair of pipes connected to the
  * standard input and output of the MATLAB process.
  *
@@ -61,12 +61,6 @@
  * - There is a problem if the Matlab script decides to pause - there
  * is apparently no way to communicate a keypress to the engine.
  *
- * - Similarly, there is no way to interrupt a long computation.
- * Pressing Ctrl-C to interrupt Prolog seems to have some effect but
- * it seems to confuse the Matlab engine.  Empirically, matlab
- * processes handle some signals (try kill -SEGV `pidof MATLAB`) but
- * not in a useful way.
- *
  * - There is no established protocol for freeing variables from
  * engGetVariable: they are likely to persist for ever, or at least
  * for a long time, except for those handled by the finalization of
@@ -100,9 +94,9 @@
 #include <queue>
 #include <sstream>
 
-#ifdef __CHAR16_TYPE__
+//#ifdef __CHAR16_TYPE__
 //typedef __CHAR16_TYPE__ char16_t; // fix for Mavericks
-#endif
+//#endif
 
 #include "engine.h"
 
@@ -157,21 +151,12 @@ public:
 
 static PL_blob_t mx_blob;
 static PL_blob_t mxnogc_blob;
-static functor_t mlerror;
+static functor_t ml_error2, plml_error2, mleng_error2, error2;
 
 // extract a blob from atom
 static void atom_to_blob(atom_t a, void **pdata, PL_blob_t **ptype) { 
   size_t    len;
-
   *pdata=PL_blob_data(a, &len, ptype);
-  if (*pdata == NULL) throw PlException("Could not get blob data");
-}
-
-void blob_type_mismatch(const char *expected, const char *found)
-{
-  std::ostringstream ss;
-  ss << "Blob type mismatch: expecting " << expected << ", got " << found;
-  throw PlException(ss.str().c_str());
 }
 
 // Extract an mxArray * from a BLOB atom
@@ -181,7 +166,7 @@ static mxArray *term_to_mx(term_t t) {
   void *p;
   
   PL_get_blob(t, &p, &len, &type);
-  if (type != &mx_blob && type != &mxnogc_blob) blob_type_mismatch("mx or mxnogc",type->name);
+  if (type != &mx_blob && type != &mxnogc_blob) throw PlTypeError("mx(_)|mxnogc(_)",t);
   return *(mxArray **) p;
 }
 
@@ -190,7 +175,6 @@ static mxArray *ablob_to_mx(atom_t a) {
   mxArray **p;
 
   atom_to_blob(a,(void **)&p,&t);
-  if (t!=&mx_blob && t!=&mxnogc_blob) blob_type_mismatch("mx or mxnogc",t->name);
   return *p;
 }
 
@@ -235,6 +219,15 @@ public:
   ~qlock_nb() { pthread_mutex_unlock(&QueueMutex); out(']'); }
 };
 
+class charbuf {
+public:
+  char *p;
+  charbuf(size_t size): p(new char[size]) { 
+    if (p==NULL) throw PlResourceError("memory"); 
+  }
+  ~charbuf() { delete [] p; }
+};
+
 // extract wsvar from blob term
 static struct wsvar *term_to_wsvar(term_t t) {
   PL_blob_t *type;
@@ -242,15 +235,42 @@ static struct wsvar *term_to_wsvar(term_t t) {
   void *p;
   
   PL_get_blob(t, &p, &len, &type);
-  if (type != &ws_blob) blob_type_mismatch("ws",type->name);
+  if (type != &ws_blob) throw PlTypeError("ws_reference",t);
   return (struct wsvar *)p;
 }
 
-char *append_at(char *p, const char *str) {
+static char *append_at(char *p, const char *str) {
   int n=strlen(str);
   memcpy(p,str,n);
   p+=n;
   return p;
+}
+
+static PlException api_error(const char *function, const char *arg) {
+  term_t ex = PL_new_term_ref();
+  if (!PL_unify_term(ex, PL_FUNCTOR, error2,
+        PL_FUNCTOR, mleng_error2, PL_CHARS, function, PL_CHARS, arg,
+        PL_VARIABLE)) 
+    throw PlResourceError();
+  return PlException(ex);
+}
+
+static PlException plml_error(const char *got, const char *expected) {
+  term_t ex = PL_new_term_ref();
+  if (!PL_unify_term(ex, PL_FUNCTOR, error2,
+        PL_FUNCTOR, plml_error2, PL_CHARS, got, PL_CHARS, expected,
+        PL_VARIABLE)) 
+    throw PlResourceError();
+  return PlException(ex);
+}
+
+static PlException ml_error(const char *msg, term_t cmd) {
+  term_t ex = PL_new_term_ref();
+  if (!PL_unify_term(ex, PL_FUNCTOR, error2, 
+        PL_FUNCTOR, ml_error2, PL_CHARS, msg, PL_TERM, cmd, 
+        PL_VARIABLE))
+    throw PlResourceError();
+  return PlException(ex);
 }
 
 /* MATLAB engine wrapper class */
@@ -296,21 +316,18 @@ public:
 		  if (engEvalString(ep,buf)!=0) bad++; 
 		}
 
-		if (bad>0) Sfprintf(Serror,"%% PLML: Failed to release %d batches of workspace variables.\n",bad);
+		if (bad>0) Sfprintf(Serror,"%% plml WARNING: Failed to release %d batches of workspace variables.\n",bad);
 	 }
   }
 
   void open(const char *cmd, atom_t id) {
     ep=engOpen(cmd);
+    if (!ep) throw api_error("engOpen",cmd);
     
-    if (ep) {
-      this->id=id;
-      outbuf=new char[BUFSIZE+1];
-      outbuf[BUFSIZE]=0;
-      engOutputBuffer(ep,outbuf,BUFSIZE);
-    } else {
-      throw PlException("open engine failed");
-    }
+    this->id=id;
+    outbuf=new char[BUFSIZE+1];
+    outbuf[BUFSIZE]=0;
+    engOutputBuffer(ep,outbuf,BUFSIZE);
   }
   void close() { 
     engClose(ep); 
@@ -322,10 +339,16 @@ public:
   bool matches(atom_t id) const { return id==this->id; }
   bool isOpen() const { return ep!=NULL; }
 
-	int skip_blanks(int skip) {
-		while(strncmp(outbuf+skip,">> \n",4)==0) skip+=4;
-		return skip;
-	}
+  void eval(const char *cmd) { 
+    if (engEvalString(ep,cmd)) throw api_error("engEvalString",cmd);
+  }
+  void putvar(const char *nm, mxArray *mx) { 
+    if (engPutVariable(ep,nm,mx)) throw api_error("engPutVariable",nm);
+  }
+  mxArray *getvar(const char *nm) {
+    mxArray *p = engGetVariable(ep, nm);
+		if (p) return p; else throw api_error("engGetVariable",nm);
+  }
 };
 
 // pool of engines, all initially closed
@@ -373,7 +396,6 @@ extern "C" {
   foreign_t mlMxPutCell(term_t mx, term_t index, term_t value);
   foreign_t mlMxCopyNoGC(term_t src, term_t dst);
   foreign_t mlMxNewRefGC(term_t src, term_t dst);
-  foreign_t mlGetOutput(term_t engine, term_t string);
 }
 
 install_t install() { 
@@ -403,7 +425,6 @@ install_t install() {
   PL_register_foreign("mlPUTCELL", 3, (pl_function_t)mlMxPutCell, 0);
   PL_register_foreign("mlCOPYNOGC", 2, (pl_function_t)mlMxCopyNoGC, 0);
   PL_register_foreign("mlNEWREFGC", 2, (pl_function_t)mlMxNewRefGC, 0);
-  PL_register_foreign("mlGETOUTPUT", 2, (pl_function_t)mlGetOutput, 0);
   
   mx_blob.magic = PL_BLOB_MAGIC;
   mx_blob.flags = PL_BLOB_UNIQUE;
@@ -429,16 +450,33 @@ install_t install() {
   ws_blob.compare = 0; 
   ws_blob.write   = 0; 
 
-  mlerror=PL_new_functor(PL_new_atom("mlerror"),3);
+  ml_error2=PL_new_functor(PL_new_atom("ml_error"),2);
+  plml_error2=PL_new_functor(PL_new_atom("plml_error"),2);
+  mleng_error2=PL_new_functor(PL_new_atom("mleng_error"),2);
+  error2=PL_new_functor(PL_new_atom("error"),2);
   pthread_mutex_init(&EngMutex,NULL);
 }
 
-void check(int rc) { if (!rc) Sfprintf(Serror,"%% PLML: *** Something failed.\n");}
+static char *chomp(int n, const char *match, char *p) {
+  if (strncmp(p,match,n)!=0) throw plml_error(p,match);
+  return p+n;
+}
 
-void check_array_index(mxArray *mx, long i) 
+static char *skip_blanks(char *p) {
+	while(strncmp(p,">> \n",4)==0) p+=4;
+	return p;
+}
+
+int array_index(mxArray *mx, term_t index) 
 {
-	 long   n = mxGetNumberOfElements(mx);
-	 if (i<=0 || i>n) throw PlException("Index out of bounds");
+	long   n = mxGetNumberOfElements(mx);
+  int    i = (int)PlTerm(index);
+	if (i<=0 || i>n) {
+		std::ostringstream ss;
+    ss << "array index in " << 1 << ".." << n;
+    throw PlDomainError(ss.str().c_str(),index);
+  }
+  return i;
 }
 
 int unify_list_sizes(term_t list, const mwSize *ints, int num)
@@ -501,8 +539,6 @@ int get_list_doubles(term_t list, long *len, double *vals)
 	return true;
 }
 
-
-
 /*
  * Member functions for SWIs blob atoms, which allow SWI to manage
  * garbage collection for user-defined data types.
@@ -541,36 +577,23 @@ int ws_release(atom_t a) {
  */
 static eng *findEngine(term_t id_term) 
 {
-  atom_t id; 
-  if(!PL_get_atom(id_term, &id)) {
-    throw PlException("id is not an atom");
-  }
+  atom_t id;
+  if (!PL_get_atom(id_term, &id)) throw PlTypeError("atom",id_term);
   for (int i=0; i<MAXENGINES; i++) {
     if (engines[i].matches(id)) return &engines[i];
   }
-  throw PlException("engine not found");
+  throw PlException(PlCompound("plml_unknown_engine", PlTermv(PlTerm(id_term))),PlTerm());
 }
 
-
-static void displayOutput(const char *prefix,const char *p) 
-{
-	Sfputs(p,Scurrent_output);
-	/* while (*p) { */
-	/* 	Sfputs(prefix,Scurrent_output); */ 
-	/* 	while (*p && *p!='\n') Sputcode(*p++,Scurrent_output); */ 
-	/* 	if (*p) p++; else Sfputs(prefix,Scurrent_output); */
-	/* 	Sputcode('\n',Scurrent_output); */ 
-	/* } */
-}
+static void displayOutput(const char *prefix,const char *p) { Sfputs(p,Scurrent_output); }
 
 /* utility function to extract UTF-8 encoded character array from 
  * a Prolog string, code list, or atom. */
-static const char *get_utf8_string_from_term(term_t t)
+static const char *term_to_utf8_string(term_t t)
 {
-	const char *s;
-	if (!PL_get_chars(t,(char **)&s, CVT_ATOM | CVT_STRING | CVT_LIST | BUF_RING | REP_UTF8)) {
-		throw PlException("plml: Could not get UTF-8 string from term");
-	}
+	const char *s; 
+	if (!PL_get_chars(t,(char **)&s, CVT_ATOM | CVT_STRING | CVT_LIST | BUF_RING | REP_UTF8))
+		throw PlTypeError("text",t);
 	return s;
 }
 
@@ -583,22 +606,23 @@ foreign_t mlOpen(term_t servercmd, term_t id_term)
 {
   try { 
     findEngine(id_term);
-    Sfprintf(Serror,"%% PLML: mlOPEN/2: Engine %s already open\n",(const char *)PlTerm(id_term));
-                PL_succeed;
+    Sfprintf(Serror,"%% plml WARNING: Engine %s already open\n",(const char *)PlTerm(id_term));
+		PL_succeed;
   } catch (...) {}
   
   try {
     // look for an unused engine structure
+    atom_t id;
+    if (!PL_get_atom_ex(id_term, &id)) return FALSE;
+  
     for (int i=0; i<MAXENGINES; i++) {
       if (!engines[i].isOpen()) {
-        atom_t id;
-        check(PL_get_atom(id_term,&id));
         engines[i].open(PlTerm(servercmd), id);
 		    displayOutput("| ",engines[i].outbuf);
         PL_succeed;
       }
     }
-    return PL_warning("mlOPEN/2: no more engines available.");
+    throw PlResourceError("Matlab engines");
   } catch (PlException &e) { 
     return e.plThrow(); 
   }
@@ -615,19 +639,6 @@ foreign_t mlClose(term_t engine) {
 }
 
 
-static int raise_exception(const char *msg, const char *loc, const char *info) {
-  term_t ex = PL_new_term_ref();
-  return PL_unify_term(ex, PL_FUNCTOR_CHARS, "error", 2,
-			 PL_FUNCTOR_CHARS, "plml_error", 3, PL_CHARS, msg, PL_CHARS, loc, PL_CHARS, info,
-			 PL_VARIABLE)
-
-		  && PL_raise_exception(ex);
-}
-
-static int raise_exception(const char *msg, const char *loc) {
-	return raise_exception(msg,loc,"none");
-}
-
 /*
  * Workspace variable handling
  */
@@ -640,32 +651,28 @@ static int raise_exception(const char *msg, const char *loc) {
 foreign_t mlWSAlloc(term_t eng, term_t blob) {
   // if varname is already bound, we should check
   // that the name has not been used in the workspace
-  class eng *engine;
-  try { engine=findEngine(eng); }
-  catch (PlException &ex) { return ex.plThrow(); }
+  try { 
+    class eng *engine=findEngine(eng); 
+    struct wsvar x;
 
-  struct wsvar x;
-	int    skip;
 
-  x.engine = engine;
+    { LOCK;
+      engine->eval("uniquevar([])"); 
 
-  { LOCK;
-	 if (engEvalString(engine->ep, "uniquevar([])")) 
-		  return raise_exception("eval_failed","uniquevar","none");
-	 // skip blank lines (see mlExec())
-	 skip=engine->skip_blanks(0);
+      // skip blank lines (see mlExec())
+      const char *pos=chomp(9,"ans =\n\nt_",skip_blanks(engine->outbuf))-2;
 
-	 if (strncmp(engine->outbuf+skip,"ans =\n\nt_",9)!=0)
-		return raise_exception("bad_output_buffer","uniquevar",engine->outbuf+skip);
-   else skip+=7;
-	 unsigned int len=strlen(engine->outbuf+skip)-2;
-	 if (len+1>sizeof(x.name)) {
-		return raise_exception("name_too_long","uniquevar",engine->outbuf+skip);
-	  }
-	 memcpy(x.name,engine->outbuf+skip,len);
-	 x.name[len]=0;
+      unsigned int len=strlen(pos)-2;
+      if (len+1>sizeof(x.name)) 
+        throw plml_error(pos,"<uniquevar name>");
+
+      memcpy(x.name,pos,len);
+      x.name[len]=0;
+      x.engine = engine;
+    }
+    return PL_unify_blob(blob,&x,sizeof(x),&ws_blob);
   }
-  return PL_unify_blob(blob,&x,sizeof(x),&ws_blob);
+  catch (PlException &ex) { return ex.plThrow(); }
 }
 
 foreign_t mlWSName(term_t blob, term_t name, term_t engine) {
@@ -686,11 +693,8 @@ foreign_t mlWSGet(term_t var, term_t val) {
   try { 
     struct wsvar *x = term_to_wsvar(var);
 		mxArray *p;
-		{ LOCK; p = engGetVariable(x->engine->ep, x->name); }
-		if (p) return PL_unify_blob(val, (void **)&p, sizeof(p), &mx_blob);
-		else {
-			return raise_exception("get_variable_failed","mlWSGET",x->name);
-		}
+    { LOCK; p=x->engine->getvar(x->name); }
+		return PL_unify_blob(val, (void **)&p, sizeof(p), &mx_blob);
   } catch (PlException &e) { 
     return e.plThrow(); 
   }
@@ -701,8 +705,8 @@ foreign_t mlWSGet(term_t var, term_t val) {
 foreign_t mlWSPut(term_t var, term_t val) {
   try { 
     struct wsvar *x=term_to_wsvar(var);
-	 lock   l;
-    return engPutVariable(x->engine->ep, x->name, term_to_mx(val)) ? FALSE : TRUE;
+    x->engine->putvar(x->name, term_to_mx(val));
+    return TRUE;
   } catch (PlException &e) { 
     return e.plThrow(); 
   }
@@ -717,111 +721,72 @@ foreign_t mlExec(term_t engine, term_t cmd)
 {
   try {
     eng *eng=findEngine(engine);
-	 const char *cmdstr=get_utf8_string_from_term(cmd);
-	 int	cmdlen=strlen(cmdstr);
-	 int	rc, skip;
-	 LOCK;
-    
-	 eng->flush_release_queue_batched();
+    const char *cmdstr=term_to_utf8_string(cmd);
+    int	cmdlen=strlen(cmdstr);
+    LOCK;
+
+    eng->flush_release_queue_batched();
 
     // if string is very long, send it via local mxArray
     if (cmdlen>MAXCMDLEN) {
       mxArray *mxcmd=mxCreateString(cmdstr);
-      engPutVariable(eng->ep,"t__cmd",mxcmd);
+      eng->putvar("t__cmd",mxcmd);
       mxDestroyArray(mxcmd);
-		cmdstr="eval(t__cmd)";
-		cmdlen=strlen(cmdstr);
-	 }
+		  cmdstr="eval(t__cmd)";
+		  cmdlen=strlen(cmdstr);
+	  }
 
-	 {  // scope for eval_cmd
-		 char *eval_cmd = new char[cmdlen+strlen(EVALFMT)-1];
-	 	 if (eval_cmd==NULL) throw PlException("Failed to allocate memory for command");
-	 	 sprintf(eval_cmd, EVALFMT, cmdstr);
-		 rc=engEvalString(eng->ep,eval_cmd); 
-	 	 delete [] eval_cmd;
-	}
-
-    if (rc) throw PlException("mlExec: engEvalString failed.");
-
-	 // If user has used Ctrl-C to break out of a Prolog goal while not inside
-	 // a Matlab call, the output buffer may contain extra lines of ">> ". If so
-	 // we should skip these.
-	 skip=eng->skip_blanks(0);
-
-	 // EVALFMT starts with disp('{'). This means that the output buffer should
-	 // contain at least the 5 characters: ">> {". If they are not there,
-	 // something is terribly wrong and we must throw an exeption.
-    if (strncmp(eng->outbuf+skip,">> {\n",5)!=0) {
-		 throw PlException(PlCompound("bad_output_buffer",PlTermv("exec",eng->outbuf+skip)));
-	 } else skip+=5;
-	
-	 // check that "}\n" is present and end of output if no buffer overflow
-	 {	int len=strlen(eng->outbuf+skip);	
-			if (len+skip<BUFSIZE) {
-			  char *trailer_pos=eng->outbuf+skip+len-2;
-				if (strncmp(trailer_pos,"}\n",2)!=0) throw PlException("plml_interrupted");
-			  *trailer_pos=0;
-			  displayOutput("| ", eng->outbuf+skip);
-			} else {
-			  displayOutput("| ", eng->outbuf+skip);
-				Sfprintf(Serror,"%% PLML: output truncated\n");
-			}
-	 }
-
-
-	 // call engine to eval lasterr, then scrape from output buffer
-	 rc=engEvalString(eng->ep,"lasterr");
-	 if (rc) { throw PlException("mlExec: unable to execute lasterr"); }
-
-	 // skip lines like ">> " again
-	 skip=eng->skip_blanks(0);
-
-	 if (strncmp(eng->outbuf+skip,"ans =",5)!=0) {
-		 throw PlException(PlCompound("bad_output_buffer",PlTermv("lasterr",eng->outbuf+skip)));
-	 } else skip+=5;
-	 skip+=2;
-
-	 if (strncmp(eng->outbuf+skip,"     ''",7)!=0) {
-		int len=strlen(eng->outbuf+skip)-2;
-		char *lasterr= new char[len+1];
-		term_t desc=PL_new_term_ref();
-		term_t cmd=PL_new_term_ref();
-		term_t ex=PL_new_term_ref();
-
-		memcpy(lasterr,eng->outbuf+skip,len);
-		lasterr[len]=0;
-
-		PL_put_atom_chars(desc,lasterr);
-		PL_put_atom_chars(cmd,cmdstr);
-		delete [] lasterr;
-
-		check(PL_cons_functor(ex,mlerror,engine,desc,cmd));
-		throw PlException(ex);
+    {  // scope for eval_cmd
+      charbuf eval_cmd(cmdlen+strlen(EVALFMT)-1);
+      sprintf(eval_cmd.p, EVALFMT, cmdstr);
+      eng->eval(eval_cmd.p);
     }
-	 return TRUE;
+
+    char *pos=skip_blanks(eng->outbuf);
+    bool completed, parsed=(strncmp(pos,">> {\n",5)==0);
+
+    if (parsed) {
+      pos+=5;
+    	int len=strlen(pos);	
+      
+      // check that "}\n" is present and end of output if no buffer overflow
+      if (pos+len < eng->outbuf+BUFSIZE) {
+        char *trailer_pos=pos+len-2;
+        completed=(strncmp(trailer_pos,"}\n",2)==0);
+        *trailer_pos=0;
+        displayOutput("| ", pos);
+      } else {
+        displayOutput("| ", pos);
+        displayOutput("* ", "\n[TRUNCATED]\n");
+        Sfprintf(Serror,"%% plml WARNING: output truncated\n");
+        completed=false;
+      }
+    } 
+
+    // call engine to eval lasterr, then scrape from output buffer
+    eng->eval("lasterr");
+    pos=chomp(5,"ans =",skip_blanks(eng->outbuf))+2;
+
+    if (strncmp(pos,"     ''",7)!=0) {
+      pos[strlen(pos)-2]=0;
+      throw ml_error(pos,cmd);
+    }
+    if (!parsed) throw PlException("ml_syntax_error");
+    if (!completed) throw PlException("ml_interrupted");
+	  return TRUE;
   } catch (PlException &e) { 
     return e.plThrow(); 
   }
 }
 
-foreign_t mlGetOutput(term_t engine, term_t s)
-{
-  try {
-    eng *eng=findEngine(engine);
-	 return PL_unify_chars(s, PL_STRING | REP_UTF8, -1, eng->outbuf);
-  } catch (PlException &e) { 
-    return e.plThrow(); 
-  }
-}
+// ================== mx array handling predicates ================
 
 // Get a Prolog string out of a matlab char array 
 foreign_t mlMx2String(term_t mx, term_t a)
 {
   try {
     char *str = mxArrayToString(term_to_mx(mx));
-    if (!str) {
-      return raise_exception("array is not a character array","mlMX2STRING");
-    }
+    if (!str) return PL_type_error("mx(char)",mx);
     int rc = PL_unify_chars(a, PL_STRING | REP_UTF8, -1, str);
     mxFree(str);
     return rc;
@@ -835,9 +800,7 @@ foreign_t mlMx2Atom(term_t mx, term_t a)
 {
   try {
     char *str = mxArrayToString(term_to_mx(mx));
-    if (!str) {
-      return raise_exception("array is not a character array","mlMX2ATOM");
-    }
+    if (!str) return PL_type_error("mx(char)",mx);
     int rc = PL_unify_chars(a, PL_ATOM | REP_UTF8, -1, str);
     mxFree(str);
     return rc;
@@ -851,12 +814,8 @@ foreign_t mlMx2Float(term_t mxterm, term_t a)
 {
   try {
     mxArray *mx = term_to_mx(mxterm);
-    if (!mxIsDouble(mx)) {
-      return raise_exception("not numeric","mlMX2FLOAT");
-    }
-    if (mxGetNumberOfElements(mx)!=1) {
-      return raise_exception("not a scalar","mlMX2FLOAT");
-    }
+    if (!mxIsDouble(mx)) return PL_type_error("mx(double)",mxterm);
+    if (mxGetNumberOfElements(mx)!=1) return  PL_domain_error("Matlab scalar",mxterm);
     double x = mxGetScalar(mx);
     
     return PL_unify_float(a, x);
@@ -872,7 +831,7 @@ foreign_t mlMxGetReals(term_t mxterm, term_t a)
     mxArray *mx = term_to_mx(mxterm);
 		int       n = mxGetNumberOfElements(mx);
 
-    if (!mxIsDouble(mx)) return raise_exception("not numeric","mlMXGETREALS");
+    if (!mxIsDouble(mx)) return PL_type_error("mx(double)",mxterm);
 		return unify_list_doubles(a,mxGetPr(mx),n);
   } catch (PlException &e) { 
     return e.plThrow(); 
@@ -886,7 +845,7 @@ foreign_t mlMx2Logical(term_t mxterm, term_t a)
 {
   try {
     mxArray *mx = term_to_mx(mxterm);
-		if (mxGetNumberOfElements(mx) != 1) return raise_exception("not a scalar", "mlMX2LOGICAL");
+		if (mxGetNumberOfElements(mx) != 1) return PL_type_error("mx(scalar)",mxterm);
 
     int f;
     if (mxIsLogical(mx)) {
@@ -894,7 +853,7 @@ foreign_t mlMx2Logical(term_t mxterm, term_t a)
     } else if (mxIsDouble(mx)) {
       f = (mxGetScalar(mx) > 0) ? 1 : 0;
     } else {
-      return raise_exception("not logical (captain)","mlMX2LOGICAL");
+      return PL_type_error("mx(logical)",mxterm);
     }
     
     return PL_unify_integer(a,f);
@@ -931,16 +890,13 @@ foreign_t mlMxSub2Ind(term_t mxterm, term_t substerm, term_t indterm)
 		long		nsubs;
 
 		// get substerm as int array
-		if (!get_list_integers(substerm,&nsubs,(int *)subs)) // !!
-			return raise_exception("Bad subscript list","mlMXSUB2IND");
+		if (!get_list_integers(substerm,&nsubs,(int *)subs)) 
+			return PL_type_error("list(integer)",substerm); 
 
 		// switch to zero-based subscripts
 		for (int i=0; i<nsubs; i++) subs[i]--;
-
-		int ind = mxCalcSingleSubscript(mx,nsubs,subs);
-		check_array_index(mx,ind);
-
-		return PL_unify_integer(indterm, ind);
+		return PlTerm(indterm)=mxCalcSingleSubscript(mx,nsubs,subs)
+        && (array_index(mx,indterm),TRUE);
   } catch (PlException &e) { 
     return e.plThrow(); 
   }
@@ -951,11 +907,8 @@ foreign_t mlMxGetFloat(term_t mxterm, term_t index, term_t value)
 {
   try {
     mxArray *mx = term_to_mx(mxterm);
-	 long   i;
-
-	 check(PL_get_long(index,&i));
-	 check_array_index(mx,i);
-    if (!mxIsDouble(mx)) { return PL_warning("not numeric"); }
+    long i=array_index(mx,index);
+    if (!mxIsDouble(mx)) return PL_type_error("mx(double)",mxterm);
 
     double   *p = (double *)mxGetData(mx);
     return PL_unify_float(value, p[i-1]);
@@ -969,10 +922,7 @@ foreign_t mlMxGetLogical(term_t mxterm, term_t index, term_t value)
 {
   try {
     mxArray *mx = term_to_mx(mxterm);
-	 long   i;
-
-	 check(PL_get_long(index,&i));
-	 check_array_index(mx,i);
+	  long   i=array_index(mx,i);
 
     if (mxIsLogical(mx)) {
 		 mxLogical *p = mxGetLogicals(mx);
@@ -981,7 +931,7 @@ foreign_t mlMxGetLogical(term_t mxterm, term_t index, term_t value)
 		 double   *p = (double *)mxGetData(mx);
 		 return PL_unify_integer(value, (p[i-1]>0) ? 1 : 0);
     } else {
-      return PL_warning("neither logical nor numeric");
+      return PL_type_error("mx(logical)",mxterm);
 	 }
 
   } catch (PlException &e) { 
@@ -1000,11 +950,8 @@ foreign_t mlMxGetCell(term_t mxterm, term_t index, term_t value)
 {
   try {
     mxArray *mx = term_to_mx(mxterm);
-	 long   i;
-
-	 check(PL_get_long(index,&i));
-	 check_array_index(mx,i);
-    if (!mxIsCell(mx)) { return PL_warning("not numeric"); }
+	  long   i=array_index(mx,i);
+    if (!mxIsCell(mx)) return PL_type_error("mx(cell)",mxterm);
 
     mxArray   *p = mxGetCell(mx,i-1);
     return PL_unify_blob(value, (void **)&p, sizeof(p), &mxnogc_blob);
@@ -1017,16 +964,14 @@ foreign_t mlMxGetField(term_t mxterm, term_t index, term_t field, term_t value)
 {
   try {
     mxArray *mx = term_to_mx(mxterm);
-	 long   i;
-	 char    *fname;
+    long   i=array_index(mx,index);
+    char    *fname;
 
-	 check(PL_get_long(index,&i));
-	 check(PL_get_atom_chars(field,&fname));
-	 check_array_index(mx,i);
-    if (!mxIsStruct(mx)) { return PL_warning("not a structure"); }
+    if (!PL_get_atom_chars(field,&fname)) return PL_type_error("atom",field);
+    if (!mxIsStruct(mx)) return PL_type_error("mx(struct)",mxterm);
 
     mxArray   *p = mxGetField(mx,i-1,fname);
-	 if (!p) return PL_warning("Field not present");
+    if (!p) return PL_domain_error("field in struct",field);
     return PL_unify_blob(value, (void **)&p, sizeof(p), &mxnogc_blob);
   } catch (PlException &e) { 
     return e.plThrow(); 
@@ -1041,7 +986,7 @@ foreign_t mlMxCreateNumeric(term_t size, term_t mx) {
 
 		// get size as int array
 		if (!get_list_integers(size,&ndims,(int *)dims)) 
-			return PL_warning("Bad size list");
+			return PL_type_error("list(natural)",mx);
 
     mxArray *p = mxCreateNumericArray(ndims,dims,mxDOUBLE_CLASS,mxREAL);
     return PL_unify_blob(mx, (void **)&p, sizeof(p), &mxnogc_blob);
@@ -1058,7 +1003,7 @@ foreign_t mlMxCreateCell(term_t size, term_t mx) {
 
 		// get size as int array
 		if (!get_list_integers(size,&ndims,(int *)dims)) 
-			return PL_warning("Bad size list");
+			return PL_type_error("list(natural)",mx);
 
     mxArray *p = mxCreateCellArray(ndims,dims);
     return PL_unify_blob(mx, (void **)&p, sizeof(p), &mxnogc_blob);
@@ -1070,7 +1015,7 @@ foreign_t mlMxCreateCell(term_t size, term_t mx) {
 // Create character array. 
 foreign_t mlMxCreateString(term_t string, term_t mx) {
   try { 
-    mxArray *p = mxCreateString(get_utf8_string_from_term(string));
+    mxArray *p = mxCreateString(term_to_utf8_string(string));
     return PL_unify_blob(mx, (void **)&p, sizeof(p), &mxnogc_blob);
   } catch (PlException &e) { 
     return e.plThrow(); 
@@ -1083,13 +1028,10 @@ foreign_t mlMxPutFloat(term_t mxterm, term_t index, term_t value)
 {
   try {
 		mxArray *mx = term_to_mx(mxterm);
-		long   i;
-		double val;
+		long    i=array_index(mx,index);
+		double  val=(double)PlTerm(value);
 
-		if (!mxIsDouble(mx)) { return PL_warning("not numeric"); }
-		check(PL_get_long(index,&i));
-		check(PL_get_float(value,&val));
-		check_array_index(mx,i);
+		if (!mxIsDouble(mx)) return PL_type_error("mx(double)",mxterm);
 		*(mxGetPr(mx)+i-1)=val;
 		return true;
   } catch (PlException &e) { 
@@ -1102,12 +1044,10 @@ foreign_t mlMxPutFloats(term_t mxterm, term_t index, term_t values)
 {
   try {
 		mxArray *mx = term_to_mx(mxterm);
-		long   i, len;
+		long   len, i=array_index(mx,index);
 
-		if (!mxIsDouble(mx)) { return PL_warning("not numeric"); }
-		check(PL_get_long(index,&i));
-		check_array_index(mx,i);
-		get_list_doubles(values,&len,mxGetPr(mx)+i-1);
+		if (!mxIsDouble(mx)) return PL_type_error("mx(double)",mxterm);
+		if (!get_list_doubles(values,&len,mxGetPr(mx)+i-1)) return PL_type_error("list(float)",values);
 		return true;
   } catch (PlException &e) { 
     return e.plThrow(); 
@@ -1121,11 +1061,9 @@ foreign_t mlMxPutCell(term_t mxterm, term_t index, term_t element)
   try {
 		mxArray *mx = term_to_mx(mxterm);
 		mxArray *el = term_to_mx(element);
-		long   i;
+		long   i=array_index(mx,index);
 
-		if (!mxIsCell(mx)) { return PL_warning("not a cell array"); }
-		check(PL_get_long(index,&i));
-		check_array_index(mx,i);
+		if (!mxIsCell(mx)) return PL_type_error("mx(cell)",mxterm);
 		mxSetCell(mx,i-1,el);
 		return true;
   } catch (PlException &e) { 
@@ -1154,12 +1092,4 @@ foreign_t mlMxNewRefGC(term_t in, term_t out)
   }
 }
 
-
-/* 
- * Local Variables:
- * c-basic-offset: 2
- * indent-tabs-mode: nil
- * End:
- */
-/* vim: set sw=2 ts=2 softtabstop=2 : */
-
+/* vim: set sw=2 ts=2 softtabstop=2 expandtab : */
