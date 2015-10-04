@@ -36,7 +36,7 @@
 
 :- initialization catch(mutex_create(_,[alias(mlclient)]),Ex,print_message(warning,Ex)).
 
-:- setting(exec_timeout,number,10,'Matlab command execution timeout in seconds').
+:- setting(exec_timeout,number,1800,'Matlab command execution timeout in seconds').
 :- setting(eval_timeout,number,1800,'Matlab expression evaluation timeout in seconds').
 
 :- dynamic current_matlab_thread/2.
