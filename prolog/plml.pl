@@ -472,6 +472,7 @@ leftval( tmp(X),    tmp,   X).
 leftval( loc(X),    loc,   X).
 leftval( wsseq(X),  wsseq, wsseq(X)).
 leftval( list(T,X), list(T), X).
+leftval( arr(X),    array(_,_), X).
 leftval( array(X::[Size->Type]),  array(Type,Size), X) :- !.
 leftval( array(X::[Size]),        array(float,Size), X) :- !.
 leftval( cell(X::[Size->Type]),   cell(Type,Size),  X) :- !.
@@ -778,8 +779,8 @@ convert_mx(array(Type,Size), X, L) :- !,
 compatible(double,float).
 compatible(double,int).
 compatible(double,bool).
-compatible(logical,float).
-compatible(logical,int).
+% compatible(logical,float).
+% compatible(logical,int).
 compatible(logical,bool).
 
 % !! Need to worry about non gc mx atoms
@@ -1041,7 +1042,6 @@ multiplot(Layout,Plots,Axes) :-
 %  Extensible predicate for mapping arbitrary terms to a list of options
 %  to be processed by compileoptions/2.
 
-%user:portray(A|B) :- print(A), write('|'), print(B).
 %user:portray(Z) :- mlWSNAME(Z,N,ID), format('<~w:~w>',[ID,N]).
 
 prolog:message(no_lang(Lang)) --> ['Environment variable LANG not set -- using ~w'-[Lang]].

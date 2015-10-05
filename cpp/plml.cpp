@@ -508,7 +508,7 @@ int unify_list_doubles(term_t list, double *x, int n)
 }
 
 // read list of integers from term and write to int array
-int get_list_integers(term_t list, long *len, int *vals)
+int get_list_integers(term_t list, long *len, mwSize *vals)
 {
 	term_t  head=PL_new_term_ref();
 	long 		n;
@@ -516,7 +516,7 @@ int get_list_integers(term_t list, long *len, int *vals)
 	// copy term ref so as not to modify original
 	list=PL_copy_term_ref(list);
 	for (n=0;PL_get_list(list,head,list);n++) {
-			if (!PL_get_integer(head,&vals[n])) return false;
+			if (!PL_get_long(head,(long *)&vals[n])) return false;
 	}
 	if (!PL_get_nil(list)) return false; 
 	*len=n;
@@ -890,12 +890,12 @@ foreign_t mlMxSub2Ind(term_t mxterm, term_t substerm, term_t indterm)
 		long		nsubs;
 
 		// get substerm as int array
-		if (!get_list_integers(substerm,&nsubs,(int *)subs)) 
+		if (!get_list_integers(substerm,&nsubs,subs)) 
 			return PL_type_error("list(integer)",substerm); 
 
 		// switch to zero-based subscripts
 		for (int i=0; i<nsubs; i++) subs[i]--;
-		return PlTerm(indterm)=mxCalcSingleSubscript(mx,nsubs,subs)
+    return PL_unify_integer(indterm,mxCalcSingleSubscript(mx,nsubs,subs))
         && (array_index(mx,indterm),TRUE);
   } catch (PlException &e) { 
     return e.plThrow(); 
@@ -922,7 +922,7 @@ foreign_t mlMxGetLogical(term_t mxterm, term_t index, term_t value)
 {
   try {
     mxArray *mx = term_to_mx(mxterm);
-	  long   i=array_index(mx,i);
+	  long   i=array_index(mx,index);
 
     if (mxIsLogical(mx)) {
 		 mxLogical *p = mxGetLogicals(mx);
@@ -950,7 +950,7 @@ foreign_t mlMxGetCell(term_t mxterm, term_t index, term_t value)
 {
   try {
     mxArray *mx = term_to_mx(mxterm);
-	  long   i=array_index(mx,i);
+	  long   i=array_index(mx,index);
     if (!mxIsCell(mx)) return PL_type_error("mx(cell)",mxterm);
 
     mxArray   *p = mxGetCell(mx,i-1);
@@ -985,7 +985,7 @@ foreign_t mlMxCreateNumeric(term_t size, term_t mx) {
 		long ndims;
 
 		// get size as int array
-		if (!get_list_integers(size,&ndims,(int *)dims)) 
+		if (!get_list_integers(size,&ndims,dims)) 
 			return PL_type_error("list(natural)",mx);
 
     mxArray *p = mxCreateNumericArray(ndims,dims,mxDOUBLE_CLASS,mxREAL);
@@ -1002,7 +1002,7 @@ foreign_t mlMxCreateCell(term_t size, term_t mx) {
 		long ndims;
 
 		// get size as int array
-		if (!get_list_integers(size,&ndims,(int *)dims)) 
+		if (!get_list_integers(size,&ndims,dims)) 
 			return PL_type_error("list(natural)",mx);
 
     mxArray *p = mxCreateCellArray(ndims,dims);
