@@ -8,6 +8,7 @@
 
 MATLAB=$(shell matlab -e | grep MATLAB= | sed -e "s/MATLAB=//")
 MLARCH=$(shell matlab -e | grep ^ARCH= | sed -e "s/ARCH=//")
+COMPILER=$(shell if (gcc --version 2>/dev/null | grep clang > /dev/null); then echo clang; else echo gcc; fi)
 
 TARGET=plml
 SOBJ=$(PACKSODIR)/$(TARGET).$(SOEXT)
@@ -17,10 +18,10 @@ CFLAGS+=-I$(MATLAB)/extern/include
 LIBDIR=$(MATLAB)/bin/$(MLARCH)
 LIBS=-L$(LIBDIR) -leng -lmx
 
-ifeq ($(SOEXT),dylib)
-	POST_LDFLAGS=-rpath $(LIBDIR) $(LIBS)
+ifeq ($(COMPILER),clang)
+	POST_LDFLAGS=-rpath $(LIBDIR) $(LIBS)$
 else
-	POST_LDFLAGS=-Wl,-rpath=$(LIBDIR) $(LIBS)
+	POST_LDFLAGS=-Wl,-rpath $(LIBDIR) $(LIBS) # -rpath=$(LIBDIR)?
 endif
 
 $(SOBJ): cpp/$(TARGET).o
@@ -54,7 +55,7 @@ fixdylibs:
 	sudo scripts/fixdylibs
 
 install-me:
-	swipl -f none -g "pack_install(.,[upgrade(true)]), halt"
+	swipl -f none -g "pack_install('file:.',[upgrade(true)]), halt"
 
 publish:
 	swipl -f none -g "pack_property(plml,download(D)), pack_install(D), halt"
