@@ -17,7 +17,7 @@
  *	Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-:- module(plml, 
+:- module(plml,
 	[	ml_open/1      	% (+Id)
 	,	ml_open/2      	% (+Id, +Host)
 	,	ml_open/3      	% (+Id, +Host, +Options)
@@ -48,7 +48,7 @@
 	,	compileoptions/2
 	,	multiplot/2
 	,  mhelp/1
-	
+
 	,	op(650,fy,'`')	 	% quoting things
 	,	op(160,xf,'``')		% postfix transpose operator
 	,	op(100,fy,@)		% function handles
@@ -72,7 +72,7 @@
 	,	op(1100,xfx,::)	% type specification (esp for arrays)
 	,	op(550,xfx,..)		% range of integers
 	]).
-	
+
 
 :- multifile(user:optionset/2).
 :- multifile(user:matlab_path/2).
@@ -80,7 +80,7 @@
 :- multifile(user:pl2ml_hook/2).
 
 
-/** <module> Prolog-Matlab interface 
+/** <module> Prolog-Matlab interface
 
 	---++++ Types
 
@@ -150,7 +150,7 @@
 	'Infinity'      % |--> inf (positive infinity)
 	'Nan'           % |--> nan (not a number)
 	X``             % |--> ctranpose(V[X]) (conjugate transpose, V[X]')
-	X#Y             % |--> getfield(V[X],V[q(Y)]) 
+	X#Y             % |--> getfield(V[X],V[q(Y)])
 	X\\Y            % |--> @(V[X])V[Y] (same as lambda(X,Y))
 	\\Y             % |--> @()V[Y] (same as thunk(Y))
 	lambda(X,Y)     % |--> @(V[X])V[Y] (anonymous function with arguments X)
@@ -191,11 +191,11 @@
 
 	All other Prolog atoms are written using write/1, while other Prolog terms
 	are assumed to be calls to Matlab functions named according to the head functor.
-	Thus V[ <head>( <arg1>, <arg2>, ...) ] = <head>(V[<arg1>, V[<arg2>], ...). 
+	Thus V[ <head>( <arg1>, <arg2>, ...) ] = <head>(V[<arg1>, V[<arg2>], ...).
 
-	There are some incompatibilities between Matlab syntax and Prolog syntax, 
+	There are some incompatibilities between Matlab syntax and Prolog syntax,
 	that is, syntactic structures that Prolog cannot parse correctly:
- 
+
 		* 'Command line' syntax, ie where a function of string arguments:
 		  "save('x','Y')" can be written as "save x Y" in Matlab,
 		  but in Prolog, you must use function call syntax with quoted arguments:
@@ -203,16 +203,16 @@
 
 		* Matlab's postfix transpose operator "x'" must be written using a different
 		  posfix operator "x``" or function call syntax "ctranspose(x)".
-																						
+
 		* Matlab cell referencing using braces, as in x{1,2} must be written
 		  as "cref(x,1,2)".
-																						
-		* Field referencing using dot (.), eg x.thing - currently resolved         
-		  by using hash (#) operator, eg x#thing.           
+
+		* Field referencing using dot (.), eg x.thing - currently resolved
+		  by using hash (#) operator, eg x#thing.
 
 		* Using variables as arrays and indexing them. The problem is that
 		  Prolog doesn't let you write a term with a variable as the head
-		  functor. 
+		  functor.
 
 
 	@tbd
@@ -230,7 +230,7 @@
 
 	Remove I from ml_expr//2 and add to mx type?
 */
-	  
+
 :- use_module(library(apply_macros)).
 :- use_module(library(dcg_core)).
 :- use_module(library(dcg_codes),except([q//1])).
@@ -264,9 +264,9 @@ read_line_from_pipe(Cmd,Atom) :-
 % See also mlOpen: we are going to talk to Matlab via UTF-8 strings.
 :- (getenv('LANG',Lang) -> LL=just(Lang); LL=nothing), nb_setval(plml_env_lang,LL).
 :-	use_foreign_library(foreign(plml)).
-:- nb_getval(plml_env_lang,LL), 
+:- nb_getval(plml_env_lang,LL),
    nb_delete(plml_env_lang),
-   (LL=just(Lang) -> setenv('LANG',Lang); unsetenv('LANG')). 
+   (LL=just(Lang) -> setenv('LANG',Lang); unsetenv('LANG')).
 
 :- initialization(at_halt(ml_closeall)).
 
@@ -288,7 +288,7 @@ user:goal_expansion( bt_call(Do,Undo), (Do, (true;	once(Undo), fail))).
 %  are relative to the root directory where padd.m is found.
 
 %% pl2ml_hook(+X:term,-Y:ml_expr) is nondet.
-%  Clauses of pl2ml_hook/2 allow for extensions to the Matlab expression 
+%  Clauses of pl2ml_hook/2 allow for extensions to the Matlab expression
 %  language such that =|V[$X] = V[Y]|= if =|pl2ml_hook(X,Y)|=.
 
 
@@ -300,7 +300,7 @@ user:goal_expansion( bt_call(Do,Undo), (Do, (true;	once(Undo), fail))).
 %  Start a Matlab session on the given host. If Host=localhost
 %  or the name of the current current host as returned by hostname/1,
 %  then a Matlab process is started directly. Otherwise, it is
-%  started remotely via SSH. Options defaults to []. Host defaults to 
+%  started remotely via SSH. Options defaults to []. Host defaults to
 %  localhost.
 %
 %  Start a Matlab session on the specified host using default options.
@@ -313,7 +313,7 @@ user:goal_expansion( bt_call(Do,Undo), (Do, (true;	once(Undo), fail))).
 %      If present, do not run initialisation commands specified by
 %      matlab_path/2 and matlab_init/2 clauses. Otherwise, do run them.
 %    * debug(In,Out)
-%      if present, Matlab is started in a script which captures standard 
+%      if present, Matlab is started in a script which captures standard
 %      input and output to files In and Out respectively. (tbd)
 %    * cmd(Cmd:atom)
 %      Call Cmd as the matlab executable. Default is 'matlab' (i.e. search
@@ -330,9 +330,9 @@ user:goal_expansion( bt_call(Do,Undo), (Do, (true;	once(Undo), fail))).
 %      Another mechanism for determining the Matlab path. Items are expanded
 %      using absolute_file_name/2. Default is [].
 
-ml_open(Id) :- ml_open(Id,localhost,[]). 
+ml_open(Id) :- ml_open(Id,localhost,[]).
 ml_open(Id,Host) :- ml_open(Id,Host,[]).
-ml_open(Id,Host,Options) :- 
+ml_open(Id,Host,Options) :-
 	ground(Id),
    pack_dir(PackDir),
 	option(cmd(Bin),Options,matlab),
@@ -342,7 +342,7 @@ ml_open(Id,Host,Options) :-
    once(seqmap(build,[flags,awt(AWT),host(Host),stderr(StdErr),debug(PackDir,Options),exec],Bin,Exec)),
 
 	debug(plml,'About to start Matlab with: ~q',[Exec]),
-	setup_call_catcher_cleanup( 
+	setup_call_catcher_cleanup(
       mlOPEN(Exec,Id),
       ml_init(Id,PackDir,Path),
       exception(_),
@@ -372,7 +372,7 @@ ml_init(Id,PackDir,Path) :-
    forall( member(Spec,Path),
            (  absolute_file_name(Spec,Dir,[file_type(directory)]),
               ml_exec(Id,addpath(q(Dir))))).
-					                                                                   
+
 %% build(+Spec,+Cmd1:string,-Cmd2:string) is det.
 %  This predicate is responsible for building the command to run Matlab.
 build(flags(Flags)) --> wappend([Flags]).
@@ -404,8 +404,8 @@ concat(Words,String) :- atomics_to_string(Words,' ',String).
 
 pack_dir(PackDir) :-
    module_property(plml,file(ThisFile)),
-   file_directory_name(ThisFile,PrologDir), 
-   file_directory_name(PrologDir,PackDir). 
+   file_directory_name(ThisFile,PrologDir),
+   file_directory_name(PrologDir,PackDir).
 
 addpath(Id,local(D)) :- !, ml_exec(Id,padl(q(D))).
 addpath(Id,D) :- !, ml_exec(Id,padd(q(D))).
@@ -421,9 +421,9 @@ nofail(P,X) :- catch(ignore(call(P,X)), E, print_message(warning,E)).
 %% ml_exec(+Id:ml_eng, +Expr:ml_expr) is det.
 %
 %  Execute Matlab expression without returning any values.
-ml_exec(Id,X)  :- 
+ml_exec(Id,X)  :-
 	debug(plml,'plml:ml_exec term ~W',[X,[quoted(true),max_depth(10)]]),
-	term_mlstring(Id,X,C), !, 
+	term_mlstring(Id,X,C), !,
 	debug(plml(commands),'plml:ml_exec>> ~s',[C]),
 	mlEXEC(Id,C).
 
@@ -433,8 +433,8 @@ ml_exec(Id,X)  :-
 %  form uses an explicit output types list, so Res can be completely unbound on entry
 %  even when multiple values are required.
 ml_eval(Id,X,Types,Vals) :-
-	maplist(alloc_ws(Id),Types,Vars), 
-	ml_exec(Id,hide(wsx(Vars)=X)), 
+	maplist(alloc_ws(Id),Types,Vars),
+	ml_exec(Id,hide(wsx(Vars)=X)),
 	maplist(convert_ws,Types,Vars,Vals).
 
 alloc_ws(I,_,Z) :- mlWSALLOC(I,Z).
@@ -450,16 +450,16 @@ ml_ws_name(X,Y,Z) :- mlWSNAME(X,Y,Z).
 %  Evaluate Matlab expression X as in ml_eval/4, binding one or more return values
 %  to Y. If Y is unbound or a single ml_val(_), only the first return value is bound.
 %  If Y is a list, multiple return values are processed.
-Y === X :- 
+Y === X :-
    current_engine(Id),
-	(	is_list(Y) 
+	(	is_list(Y)
 	-> maplist(leftval,Y,TX,VX), ml_eval(Id,X,TX,VX)
 	;	leftval(Y,T,V), ml_eval(Id,X,[T],[V])
 	).
 
 %% leftval( +TVal:tagged(T), -T:type, -Val:T) is det.
 %  True if TVal is a tagged value whos type is T and value is Val.
-leftval( ws(X),     ws,    ws(X)).    
+leftval( ws(X),     ws,    ws(X)).
 leftval( mx(X),     mx,    mx(X)).
 leftval( float(X),  float, X).
 leftval( int(X),    int,   X).
@@ -495,7 +495,7 @@ leftval( Val:Type,  Type,  Val).
  * DCG for term to matlab conversion
  *  the big problem with Matlab syntax is that you cannot always replace
  *  a name representing a value with an expression that reduces to that
- *  value. Eg 
+ *  value. Eg
  *     X=magic(5), X(3,4)
  *  is ok, but
  *     (magic(5))(3,4)
@@ -569,17 +569,17 @@ ml_expr(I,lambda(A,B)) --> !, ml_expr(I,A\\B).
 ml_expr(I,thunk(B))    --> !, ml_expr(I, \\B).
 
 
-% !! This is problematic: we are using apply to represent both 
+% !! This is problematic: we are using apply to represent both
 % function application and array dereferencing. For function
 % calls, A must be a function name atom or a function handle
-% If A is an array, it cannot be an expression, unless we 
+% If A is an array, it cannot be an expression, unless we
 % switch to using the paren Matlab function, which will be slower.
 ml_expr(I,apply(A,B)) --> !, ml_expr(I,A), arglist(I,B).
-ml_expr(I,cref(A,B))  --> !, ml_expr(I,A), "{", clist(I,B), "}". 
+ml_expr(I,cref(A,B))  --> !, ml_expr(I,A), "{", clist(I,B), "}".
 
 % array syntax
 ml_expr(I,arr($X))    --> !, { pl2ml_hook(X,L) }, ml_expr(I,arr(L)).
-ml_expr(I,arr(L))     --> !, { array_dims(L,D) }, array(D,I,L). 
+ml_expr(I,arr(L))     --> !, { array_dims(L,D) }, array(D,I,L).
 ml_expr(I,arr(D,L))   --> !, array(D,I,L).
 ml_expr(I,arr(D,L,P)) --> !, array(D,I,P,L).
 ml_expr(I,atvector(L))--> !, "[", clist_at(I,L), "]".
@@ -600,7 +600,7 @@ ml_expr(_,A) --> {atomic(A)}, !, atm(A).
 ml_expr(I,F) --> {F=..[H|AX]}, atm(H), arglist(I,AX).
 
 ml_expr_with(I,Lambda,Y) --> {copy_term(Lambda,Y\\PY)}, ml_expr(I,PY).
-	
+
 
 % take output of DCG phrase P and generate properly escaped Matlab single quoted string.
 q(P) --> {phrase(P,Codes)}, "'", esc(ml_quote,Codes), "'".
@@ -682,8 +682,8 @@ atm(A,C,T) :- format(codes(C,T),'~w',[A]).
 
 varnames(L) :- varnames(1,L).
 varnames(_,[]).
-varnames(N,[TN|Rest]) :- 
-	atom_concat(p_,N,TN), succ(N,M), 
+varnames(N,[TN|Rest]) :-
+	atom_concat(p_,N,TN), succ(N,M),
 	varnames(M,Rest).
 
 
@@ -700,7 +700,7 @@ term_texatom(Term,Atom) :- phrase(pl2tex(Term),String), !, atom_codes(Atom,Strin
 % Once the computation has been done, the MATLAB workspace contains
 % the results which must be transferred in the appropriate form the
 % specified left-values, in one of several forms, eg mxArray pointer,
-% a float, an atom, a string or a locator. 
+% a float, an atom, a string or a locator.
 %
 % Note that requesting a locator causes a further call
 % to MATLAB to do a dbsave.
@@ -719,7 +719,7 @@ term_texatom(Term,Atom) :- phrase(pl2tex(Term),String), !, atom_codes(Atom,Strin
 %  determined by Type.
 convert_ws(ws, Z, ws(Z)) :- !.
 convert_ws(wsseq, Z, wsseq(Z)) :- !.
-convert_ws(mx, Z, mx(Y)) :- !, mlWSGET(Z,Y). 
+convert_ws(mx, Z, mx(Y)) :- !, mlWSGET(Z,Y).
 
 % conversions that go direct from workspace variables to matbase.
 convert_ws(tmp, Z, Y) :- !, mlWSNAME(Z,_,I), bt_call(db_tmp(I,ws(Z),Y), db_drop(I,Y)).
@@ -727,17 +727,17 @@ convert_ws(mat, Z, Y) :- !, mlWSNAME(Z,_,I), bt_call(db_save(I,ws(Z),Y), db_drop
 
 % return cell array as list of temporary or permanent mat file locators
 % (this avoids getting whole array from WS to MX).
-convert_ws(cell(tmp,Size), Z, L) :- !, 
+convert_ws(cell(tmp,Size), Z, L) :- !,
 	mlWSNAME(Z,_,I),
 	bt_call(db_tmp_all(I,ws(Z),L,Size), db_drop_all(I,L,Size)).
 
-convert_ws(cell(mat,Size), Z, L) :- !, 
+convert_ws(cell(mat,Size), Z, L) :- !,
 	mlWSNAME(Z,_,I),
 	bt_call(db_save_all(I,ws(Z),L,Size), db_drop_all(I,L,Size)).
 
 % Most other conversions from ws(_) go via mx(_)
-convert_ws(T,Z,A) :- 
-	mlWSGET(Z,X), 
+convert_ws(T,Z,A) :-
+	mlWSGET(Z,X),
 	convert_mx(T,X,A).
 
 
@@ -753,22 +753,22 @@ convert_mx(term,   X, Y) :- !, mlMX2ATOM(X,Z), term_to_atom(Y,Z).
 convert_mx(loc,    X, mat(Y,W)) :- !, mlMX2ATOM(X,Z), term_to_atom(Y|W,Z).
 
 convert_mx(mat,    X, Y) :- !, % !!! use first engine to save to its matbase
-	current_engine(I),  
+	current_engine(I),
 	bt_call( db_save(I,mx(X),Y), db_drop(I,Y)).
 convert_mx(tmp,    X, Y) :- !, % !!! use first engine to save to its matbase
-	current_engine(I),  
+	current_engine(I),
 	bt_call( db_tmp(I,mx(X),Y), db_drop(I,Y)).
 
-convert_mx(list(float), X, Y) :- !, mlGETREALS(X,Y). 
+convert_mx(list(float), X, Y) :- !, mlGETREALS(X,Y).
 
-convert_mx(cell(Type,Size), X, L) :- !, 
+convert_mx(cell(Type,Size), X, L) :- !,
 	mx_size_type(X,Size,cell),
 	prodlist(Size,1,Elems), % total number of elements
 	mapnats(conv_cref(Type,X),Elems,[],FL),
 	reverse(Size,RSize),
 	unflatten(RSize,FL,L).
 
-convert_mx(array(Type,Size), X, L) :- !, 
+convert_mx(array(Type,Size), X, L) :- !,
 	mx_size_type(X,Size,MXType),
 	compatible(MXType,Type),
 	prodlist(Size,1,Elems), % total number of elements
@@ -784,15 +784,15 @@ compatible(double,bool).
 compatible(logical,bool).
 
 % !! Need to worry about non gc mx atoms
-conv_aref(bool,  X,I,Y) :- !, mlGETLOGICAL(X,I,Y). 
-conv_aref(float, X,I,Y) :- !, mlGETFLOAT(X,I,Y). 
-conv_aref(int,   X,I,Y) :- !, mlGETFLOAT(X,I,W), Y is truncate(W). 
+conv_aref(bool,  X,I,Y) :- !, mlGETLOGICAL(X,I,Y).
+conv_aref(float, X,I,Y) :- !, mlGETFLOAT(X,I,Y).
+conv_aref(int,   X,I,Y) :- !, mlGETFLOAT(X,I,W), Y is truncate(W).
 
 conv_cref(mx,Z,I,Y) :- !, mlGETCELL(Z,I,Y). % !! non gc mx
 conv_cref(Ty,Z,I,Y) :- !, conv_cref(mx,Z,I,X), convert_mx(Ty,X,Y).
 
-%convert(W, field(Z,N,I)) :- convert(mx(X),Z), mlGETFIELD(X,I,N,Y), convert_mx(W,Y). 
-%convert(W, field(Z,N))   :- convert(mx(X),Z), mlGETFIELD(X,1,N,Y), convert_mx(W,Y). 
+%convert(W, field(Z,N,I)) :- convert(mx(X),Z), mlGETFIELD(X,I,N,Y), convert_mx(W,Y).
+%convert(W, field(Z,N))   :- convert(mx(X),Z), mlGETFIELD(X,1,N,Y), convert_mx(W,Y).
 
 % Utilities used by convert/2
 
@@ -805,7 +805,7 @@ prodlist([X1|XX],P1,P3) :- P2 is P1*X1, prodlist(XX,P2,P3).
 concat(0,_,[]) --> !, [].
 concat(N,L,[X1|XX]) --> { succ(M,N), length(X1,L) }, X1, concat(M,L,XX).
 
-% convert a flat list into a nested-list array representation 
+% convert a flat list into a nested-list array representation
 % using given size specification
 unflatten([N],Y,Y) :- !, length(Y,N).
 unflatten([N|NX],Y,X) :-
@@ -830,7 +830,7 @@ mx_string(string(Y),mx(X)) :- mlCREATESTRING(Y,Z), mlNEWREFGC(Z,X).
 % MX as MUTABLE variables
 mx_put(aref(mx(X),I),float(Y)) :- mlPUTFLOAT(X,I,Y).
 mx_put(cref(mx(X),I),mx(Y))    :- mlPUTCELL(X,I,Y). % !! ensure that Y is non gc
-mx_put(mx(X),list(float,Y))    :- mlPUTFLOATS(X,1,Y). 
+mx_put(mx(X),list(float,Y))    :- mlPUTFLOATS(X,1,Y).
 
 %% wsvar(+X:ws_blob(A), -Nm:atom, -Id:ml_eng) is semidet.
 %  True if X is a workspace variable in Matlab session Id.
@@ -859,10 +859,10 @@ db_save(I,Z,Y)   :- ml_eval(I,dbsave(Z),[loc],[Y]).
 db_tmp(I,Z,Y)    :- ml_eval(I,dbtmp(Z),[loc],[Y]).
 db_drop(I,mat(A,B)) :- ml_exec(I,dbdrop(\loc(A,B))).
 
-db_save_all(I,Z,L,Size) :- ml_eval(I,dbcellmap(@dbsave,Z),[cell(loc,Size)],[L]). 
-db_tmp_all(I,Z,L,Size)  :- ml_eval(I,dbcellmap(@dbtmp,Z),[cell(loc,Size)],[L]). 
-db_drop_all(I,L,Size)   :- 
-	length(Size,Dims), 
+db_save_all(I,Z,L,Size) :- ml_eval(I,dbcellmap(@dbsave,Z),[cell(loc,Size)],[L]).
+db_tmp_all(I,Z,L,Size)  :- ml_eval(I,dbcellmap(@dbtmp,Z),[cell(loc,Size)],[L]).
+db_drop_all(I,L,Size)   :-
+	length(Size,Dims),
 	ml_exec(I,hide(foreach(@dbdrop,arr(Dims,L,X\\{loc(X)})))).
 
 
@@ -881,7 +881,7 @@ matbase_mat(Id,mat(SubDir/File,x)) :-
 
 	atom_concat(DBRoot,'*/d*',DirPattern),
 	expand_file_name(DirPattern,Dirs),
-	member(FullDir,Dirs), 
+	member(FullDir,Dirs),
 	atom_concat( DBRoot,SubDirAtom,FullDir),
 	term_to_atom(SubDir,SubDirAtom),
 	atom_concat(FullDir,'/m*.mat',FilePattern),
@@ -889,13 +889,13 @@ matbase_mat(Id,mat(SubDir/File,x)) :-
 	member(FullFile,Files),
 	file_base_name(FullFile,FN),
 	atom_concat(File,'.mat',FN).
-	
+
 
 %% persist_item(+X:ml_expr(A),-Y:ml_expr(A)) is det.
 %  Convert Matlab expression to persistent form not dependent on
 %  current Matlab workspace or MX arrays in Prolog memory space.
 %  Large values like arrays and structures are saved in the matbase
-%  replaced with matbase locators. Scalar values are converted to 
+%  replaced with matbase locators. Scalar values are converted to
 %  literal numeric values. Character strings are converted to Prolog atoms.
 %  Cell arrays wrapped in the wsseq/1 functor are converted to literal
 %  form.
@@ -903,32 +903,32 @@ matbase_mat(Id,mat(SubDir/File,x)) :-
 %  NB. any side effects are undone on backtracking -- in particular, any
 %  files created in the matbase are deleted.
 persist_item($T,$T) :- !.
-persist_item(mat(A,B),mat(A,B)) :- !.  
+persist_item(mat(A,B),mat(A,B)) :- !.
 
 persist_item(ws(A),B) :- !,
-	mlWSNAME(A,_,Eng), 
+	mlWSNAME(A,_,Eng),
 	ml_eval(Eng,typecode(ws(A)),[int,bool,bool],[Numel,IsNum,IsChar]),
 	(	Numel=1, IsNum=1
-	->	convert_ws(float,A,B) 
+	->	convert_ws(float,A,B)
 	;	IsChar=1
 	-> convert_ws(atom,A,AA), B= `AA
 	;	convert_ws(mat,A,B)
 	).
 
 
-% !! TODO - 
+% !! TODO -
 %     deal with collections - we can either save the aggregate
 %     OR save the elements individually and get a prolog list of the
 %     locators.
-persist_item(wsseq(A),cell(B)) :- 
-	mlWSNAME(A,_,Eng), 
-	ml_test(Eng,iscell(ws(A))), 
+persist_item(wsseq(A),cell(B)) :-
+	mlWSNAME(A,_,Eng),
+	ml_test(Eng,iscell(ws(A))),
 	ml_eval(Eng,wsseq(A),[cell(mat,_)],[B]).
 
-persist_item(mx(X),B) :- 
+persist_item(mx(X),B) :-
 	mx_size_type(X,Size,Type),
 	(	Size=[1], Type=double
-	->	convert_mx(float,X,B) 
+	->	convert_mx(float,X,B)
 	;	Type=char
 	-> convert_mx(atom,X,AA), B= `AA
 	;	convert_mx(mat,X,B)
@@ -975,7 +975,7 @@ rec_optslist([H|T],L) :-
 	( % mutually exclusive types for H
 		optionset(H,Opts1) -> rec_optslist(Opts1,Opts)
 	;  H=Name:Value       -> Opts=[`Name,Value]
-	;	is_list(H)         -> rec_optslist(H,Opts) 
+	;	is_list(H)         -> rec_optslist(H,Opts)
 	; /* assume struct */    Opts=[H]
 	),
 	rec_optslist(T,TT),
@@ -986,7 +986,7 @@ rtimes(X,Y,Z) :-
 	; var(Y) -> Y is Z/X
 	;           Z is X*Y).
 
-					
+
 % Execute several plots as subplots. The layout can be
 % vertical, horizontal, or explicity given as Rows*Columns.
 
@@ -1001,13 +1001,13 @@ mplot(figure,N,Plot,Ax) :- ?? (figure(N); Plot), Ax===gca.
 %  Executes plotting commands in Cmds in multiple figures or axes as determined
 %  by Type. Valid types are:
 %    * figs(Range)
-%      Executes each plot in a separate figure, Range must be P..Q where P 
+%      Executes each plot in a separate figure, Range must be P..Q where P
 %      and Q are figure numbers.
 %    * vertical
-%      Executes each plot in a subplot; 
+%      Executes each plot in a subplot;
 %      subplots are arranged vertically top to bottom in the current figure.
 %    * horizontal
-%      Executes each plot in a subplot; 
+%      Executes each plot in a subplot;
 %      subplots are arranged horizontally left to right in the current figure.
 %    * [Type, link(Axis)]
 %      As for multplot type Type, but link X or Y axis scales as determined by Axis,
@@ -1028,7 +1028,7 @@ multiplot(figs(P..Q),Plots,Axes) :- !,
 	between(1,inf,P), Q is P+N-1,
 	numlist(P,Q,PlotNums),
 	maplist(mplot(figure),PlotNums,Plots,Axes).
-	
+
 multiplot(Layout,Plots,Axes) :-
 	length(Plots,N),
 	member(Layout:H*W,[vertical:N*1, horizontal:1*N, H*W:H*W]),
@@ -1053,26 +1053,35 @@ prolog:message(error(mleng_error(Function,Arg),_)) -->
    ['Matlab engine API function ~w failed on "~s"',[Function,Arg]].
 prolog:message(error(plml_error(Got,Expected),_)) -->
    ['plml protocol error: got ~q, expected ~q'-[Got,Expected]].
-prolog:message(error(ml_error(Msg,Cmd),_)) --> 
+prolog:message(error(ml_error(Msg,Cmd),_)) -->
+   {shorten(Cmd, ShortCmd)},
    ['Matlab error:'-[], nl, '>> ~w'-[Msg], nl],
-   ['while executing "~s"'-[Cmd]].
+   ['while executing "~s"'-[ShortCmd]].
 
+shorten(S1, S2) :-
+   length(S1, L1),
+   (  L1 =< 1000 -> S2=S1
+   ;  length(Pre,300), append(Pre,Rest,S1),
+      length(Suff,300), append(_,Suff,Rest),
+      append("  ...  ", Suff, Inter),
+      append(Pre, Inter, S2)
+   ).
 
 
 %% pl2tex(+Exp:tex_expr)// is det.
 %
 % DCG for texifying expressions (useful for matlab text)
-pl2tex(A=B)  --> !, pl2tex(A), "=", pl2tex(B). 
-pl2tex(A+B)  --> !, pl2tex(A), "+", pl2tex(B). 
-pl2tex(A-B)  --> !, pl2tex(A), "-", pl2tex(B). 
-pl2tex(A*B)  --> !, pl2tex(A), "*", pl2tex(B). 
-pl2tex(A.*B) --> !, pl2tex(A), "*", pl2tex(B). 
-pl2tex(A/B)  --> !, pl2tex(A), "/", pl2tex(B). 
-pl2tex(A./B) --> !, pl2tex(A), "/", pl2tex(B). 
-pl2tex(A\B)  --> !, pl2tex(A), "\\", pl2tex(B). 
-pl2tex(A.\B) --> !, pl2tex(A), "\\", pl2tex(B). 
-pl2tex(A^B)  --> !, pl2tex(A), "^", brace(pl2tex(B)). 
-pl2tex(A.^B) --> !, pl2tex(A), "^", brace(pl2tex(B)). 
+pl2tex(A=B)  --> !, pl2tex(A), "=", pl2tex(B).
+pl2tex(A+B)  --> !, pl2tex(A), "+", pl2tex(B).
+pl2tex(A-B)  --> !, pl2tex(A), "-", pl2tex(B).
+pl2tex(A*B)  --> !, pl2tex(A), "*", pl2tex(B).
+pl2tex(A.*B) --> !, pl2tex(A), "*", pl2tex(B).
+pl2tex(A/B)  --> !, pl2tex(A), "/", pl2tex(B).
+pl2tex(A./B) --> !, pl2tex(A), "/", pl2tex(B).
+pl2tex(A\B)  --> !, pl2tex(A), "\\", pl2tex(B).
+pl2tex(A.\B) --> !, pl2tex(A), "\\", pl2tex(B).
+pl2tex(A^B)  --> !, pl2tex(A), "^", brace(pl2tex(B)).
+pl2tex(A.^B) --> !, pl2tex(A), "^", brace(pl2tex(B)).
 pl2tex((A,B))--> !, pl2tex(A), ", ", pl2tex(B).
 pl2tex(A;B)--> !, pl2tex(A), "; ", pl2tex(B).
 pl2tex(A:B)--> !, pl2tex(A), ": ", pl2tex(B).
@@ -1080,12 +1089,12 @@ pl2tex({A})  --> !, "\\{", pl2tex(A), "\\}".
 pl2tex([])   --> !, "[]".
 pl2tex([X|XS])  --> !, "[", seqmap_with_sep(", ",pl2tex,[X|XS]), "]".
 
-pl2tex(A\\B) --> !, "\\lambda ", pl2tex(A), ".", pl2tex(B). 
+pl2tex(A\\B) --> !, "\\lambda ", pl2tex(A), ".", pl2tex(B).
 pl2tex(@A)   --> !, "@", pl2tex(A).
-pl2tex(abs(A)) --> !, "|", pl2tex(A), "|". 
-pl2tex(A)    --> {atomic(A)}, escape_with(0'\\,0'_,at(A)). 
-pl2tex(A) --> 
-	{compound(A), A=..[H|T] }, 
+pl2tex(abs(A)) --> !, "|", pl2tex(A), "|".
+pl2tex(A)    --> {atomic(A)}, escape_with(0'\\,0'_,at(A)).
+pl2tex(A) -->
+	{compound(A), A=..[H|T] },
 	pl2tex(H), paren(seqmap_with_sep(", ",pl2tex,T)).
 
 hostname(H) :-
